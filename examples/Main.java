@@ -1,5 +1,5 @@
-class Main { //implements Comparable {
-    //static int foo = 1;
+class Main implements Comparable {
+    static int foo = 1;
     //static float bar = 2.5f;
 
     //too hard basket :)
@@ -25,7 +25,7 @@ class Main { //implements Comparable {
     //    return x * y;
     //}
 
-    //public int compareTo(Object o) {
-    //    return -1;
-    //}
+    public int compareTo(Object o) {
+        return -1;
+    }
 }
