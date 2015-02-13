@@ -41,9 +41,18 @@ jvmc = Class
     , cSourceFile = Just "Jvmc.java"
     }
   where
-    code = Code 1 1 [ BIPush 42
-                    , InvokeStatic (MethodRef (ClassRef "java/lang/System") (NameType "exit" (Type "(I)V")))
-                    , Return ]
+    code = Code 1 [ GetStatic sysOut
+                  , SPush "Hello World!"
+                  , InvokeVirtual println
+                  , BIPush 42
+                  , InvokeStatic sysExit
+                  , Return ]
+
+    sysOut  = FieldRef  (ClassRef "java/lang/System")    (NameType "out"     (Type "Ljava/io/PrintStream;"))
+    sysExit = MethodRef (ClassRef "java/lang/System")    (NameType "exit"    (Type "(I)V"))
+    println = MethodRef (ClassRef "java/io/PrintStream") (NameType "println" (Type "(Ljava/lang/String;)V"))
+
+-- java/io/PrintStream.println : (Ljava/lang/String;)V
 
 ------------------------------------------------------------------------
 
@@ -118,8 +127,7 @@ data MethodAccess =
 ------------------------------------------------------------------------
 
 data Code = Code
-    { cMaxStack     :: Word16 -- probably should
-    , cMaxLocals    :: Word16 -- be calculated
+    { cMaxLocals    :: Word16 -- be calculated
     , cInstructions :: [Instruction]
     } deriving (Eq, Ord, Show, Read)
 
@@ -127,6 +135,11 @@ data Code = Code
 
 newtype ClassRef = ClassRef { unClassRef :: Text }
     deriving (Eq, Ord, Show, Read)
+
+data FieldRef = FieldRef
+    { fClass    :: ClassRef
+    , fNameType :: NameType
+    } deriving (Eq, Ord, Show, Read)
 
 data MethodRef = MethodRef
     { mClass    :: ClassRef
@@ -145,7 +158,9 @@ data ConstPool = ConstPool
     { cpNext      :: ConstRef
     , cpValues    :: [ConstVal]
     , cpUtf8s     :: Map Text      ConstRef
+    , cpStrings   :: Map Text      ConstRef
     , cpClasses   :: Map ClassRef  ConstRef
+    , cpFields    :: Map FieldRef  ConstRef
     , cpMethods   :: Map MethodRef ConstRef
     , cpNameTypes :: Map NameType  ConstRef
     } deriving (Eq, Ord, Show, Read)
@@ -155,13 +170,16 @@ newtype ConstRef = ConstRef { unConstRef :: Word16 }
 
 data ConstVal =
       ConstUtf8     Text
+    | ConstString   ConstRef
     | ConstClass    ConstRef
+    | ConstField    ConstRef ConstRef
     | ConstMethod   ConstRef ConstRef
     | ConstNameType ConstRef ConstRef
     deriving (Eq, Ord, Show, Read)
 
 emptyConstPool :: ConstPool
-emptyConstPool = ConstPool (ConstRef 1) [] M.empty M.empty M.empty M.empty
+emptyConstPool = ConstPool
+    (ConstRef 1) [] M.empty M.empty M.empty M.empty M.empty M.empty
 
 ------------------------------------------------------------------------
 
@@ -183,6 +201,17 @@ addUtf8Ref utf8 = do
       Nothing -> do
         ref <- state (insertVal (ConstUtf8 utf8))
         modify (\cp -> cp { cpUtf8s = M.insert utf8 ref (cpUtf8s cp) })
+        return ref
+
+addString :: Text -> CP ConstRef
+addString str = do
+    m <- gets (M.lookup str . cpStrings)
+    case m of
+      Just x  -> return x
+      Nothing -> do
+        uref <- addUtf8Ref str
+        ref  <- state (insertVal (ConstString uref))
+        modify (\cp -> cp { cpStrings = M.insert str ref (cpStrings cp) })
         return ref
 
 addNameType :: NameType -> CP ConstRef
@@ -207,6 +236,18 @@ addMethodRef mr@(MethodRef cls nt) = do
         nref <- addNameType nt
         ref  <- state (insertVal (ConstMethod cref nref))
         modify (\cp -> cp { cpMethods = M.insert mr ref (cpMethods cp) })
+        return ref
+
+addFieldRef :: FieldRef -> CP ConstRef
+addFieldRef mr@(FieldRef cls nt) = do
+    m <- gets (M.lookup mr . cpFields)
+    case m of
+      Just x  -> return x
+      Nothing -> do
+        cref <- addClassRef cls
+        nref <- addNameType nt
+        ref  <- state (insertVal (ConstField cref nref))
+        modify (\cp -> cp { cpFields = M.insert mr ref (cpFields cp) })
         return ref
 
 addClassRef :: ClassRef -> CP ConstRef
@@ -264,7 +305,10 @@ bConstPool ConstPool{..} = word16BE cpCount
         bs = T.encodeUtf8 txt
         n  = fromIntegral (B.length bs)
 
+    go (ConstString ref) = word8 8 <> bConstRef ref
+
     go (ConstClass ref)          = word8 7  <> bConstRef ref
+    go (ConstField cref nref)    = word8 9  <> bConstRef cref <> bConstRef nref
     go (ConstMethod cref nref)   = word8 10 <> bConstRef cref <> bConstRef nref
     go (ConstNameType nref tref) = word8 12 <> bConstRef nref <> bConstRef tref
 
@@ -276,6 +320,9 @@ bUtf8Ref = (bConstRef <$>) . addUtf8Ref
 
 bClassRef :: ClassRef -> CP Builder
 bClassRef = (bConstRef <$>) . addClassRef
+
+bFieldRef :: FieldRef -> CP Builder
+bFieldRef = (bConstRef <$>) . addFieldRef
 
 bMethodRef :: MethodRef -> CP Builder
 bMethodRef = (bConstRef <$>) . addMethodRef
@@ -330,16 +377,24 @@ bMethod Method{..} = do
 bCode :: Code -> CP Builder
 bCode Code{..} = do
     lbs <- toLazyByteString . mconcat <$> mapM bInstruction cInstructions
-    return $ word16BE cMaxStack
+    return $ word16BE maxStack
           <> word16BE cMaxLocals
           <> word32BE (fromIntegral (L.length lbs))
           <> lazyByteString lbs
           <> word16BE 0 -- exception table
           <> word16BE 0 -- attributes
+  where
+    maxStack = fromIntegral
+             . maximum
+             . scanl (+) 0
+             . map stackDiff
+             $ cInstructions
 
 bInstruction :: Instruction -> CP Builder
 bInstruction i = case i of
     BIPush x -> pure (word8 0x10 <> int8 x)
+
+    SPush x -> ldc <$> addString x
 
     IReturn -> pure (word8 0xac)
     LReturn -> pure (word8 0xad)
@@ -348,7 +403,35 @@ bInstruction i = case i of
     AReturn -> pure (word8 0xb0)
     Return  -> pure (word8 0xb1)
 
-    InvokeStatic x -> (word8 0xb8 <>) <$> bMethodRef x
+    GetStatic     x -> (word8 0xb2 <>) <$> bFieldRef x
+    InvokeVirtual x -> (word8 0xb6 <>) <$> bMethodRef x
+    InvokeStatic  x -> (word8 0xb8 <>) <$> bMethodRef x
+
+    x -> error ("bInstruction: Unknown instruction: " <> show x)
+  where
+    ldc (ConstRef ref) | ref <= max8 = word8 0x12 <> word8 (fromIntegral ref)
+                       | otherwise   = word8 0x13 <> word16BE ref
+
+    max8 = fromIntegral (maxBound :: Word8)
+
+stackDiff :: Instruction -> Int
+stackDiff i = case i of
+    BIPush _ -> 1
+
+    SPush _ -> 1
+
+    IReturn -> -1
+    LReturn -> -2
+    FReturn -> -1
+    DReturn -> -2
+    AReturn -> -1
+    Return  -> 0
+
+    GetStatic     _ -> 1
+    InvokeVirtual _ -> -1 -- need to count params
+    InvokeStatic  _ -> 0  -- need to count params
+
+    x -> error ("stackDiff: Unknown instruction: " <> show x)
 
 ------------------------------------------------------------------------
 
@@ -438,10 +521,12 @@ data Instruction =
     | BIPush Int8           -- ^ 0x10 - push a byte onto the stack as an integer value
     | SIPush Int16          -- ^ 0x11 - push a short onto the stack
 
-    | LDC    Word8          -- ^ 0x12 - push a constant #index from a constant pool (String, int or float) onto the stack
-    | LDC_W  Word16         -- ^ 0x13 - push a constant #index from a constant pool (String, int or float) onto the stack
+    | SPush Text            -- ^ 0x12 or 0x13 - push a String from constant pool #index onto the stack
+
+    | LdC    Word8          -- ^ 0x12 - push a constant #index from a constant pool (String, int or float) onto the stack
+    | LdC_W  Word16         -- ^ 0x13 - push a constant #index from a constant pool (String, int or float) onto the stack
                             --            (wide index is constructed as indexbyte1 << 8 + indexbyte2)
-    | LDC2_W Word16         -- ^ 0x14 - push a constant #index from a constant pool (double or long) onto the stack
+    | LdC2_W Word16         -- ^ 0x14 - push a constant #index from a constant pool (double or long) onto the stack
                             --            (wide index is constructed as indexbyte1 << 8 + indexbyte2)
 
     | ILoad Word8           -- ^ 0x15 - load an int value from a local variable #index
@@ -653,8 +738,8 @@ data Instruction =
     | AReturn               -- ^ 0xb0 - return a reference
     | Return                -- ^ 0xb1 - return void
 
-    | GetStatic Word16      -- ^ 0xb2 - get static field value of class, where field is identified by #index in constant pool
-    | PutStatic Word16      -- ^ 0xb3 - set static field value of class, where field is identified by #index in constant pool
+    | GetStatic FieldRef    -- ^ 0xb2 - get static field value of class, where field is identified by #index in constant pool
+    | PutStatic FieldRef    -- ^ 0xb3 - set static field value of class, where field is identified by #index in constant pool
 
     | GetField  Word16      -- ^ 0xb4 - get field value of object, where the field is identified by #index in constant pool
     | PutField  Word16      -- ^ 0xb5 - set field value of object, where the field is identified by #index in constant pool
