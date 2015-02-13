@@ -5,7 +5,7 @@
 
 module Main (main) where
 
-import           Control.Applicative ((<$>))
+import           Control.Applicative (Applicative, (<$>), (<*>), pure)
 import           Control.Monad.State.Lazy
 import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
@@ -37,12 +37,13 @@ jvmc = Class
     , cSuper      = ClassRef "java/lang/Object"
     , cInterfaces = [ClassRef "java/lang/Comparable"]
     , cFields     = [Field [F'Static] "foo" (Type "I")]
-    , cMethods    = [Method [M'Public, M'Static] "main" (Type "([Ljava/lang/String;)I") (Just code)]
+    , cMethods    = [Method [M'Public, M'Static] "main" (Type "([Ljava/lang/String;)V") (Just code)]
     , cSourceFile = Just "Jvmc.java"
     }
   where
     code = Code 1 1 [ BIPush 42
-                    , IReturn ]
+                    , InvokeStatic (MethodRef (ClassRef "java/lang/System") (NameType "exit" (Type "(I)V")))
+                    , Return ]
 
 ------------------------------------------------------------------------
 
@@ -55,9 +56,6 @@ data Class = Class
     , cMethods    :: [Method]
     , cSourceFile :: Maybe Text
     } deriving (Eq, Ord, Show, Read)
-
-newtype ClassRef = ClassRef { unClassRef :: Text }
-    deriving (Eq, Ord, Show, Read)
 
 data ClassAccess =
       C'Public     -- ^ Declared public; may be accessed from outside its package.
@@ -126,30 +124,49 @@ data Code = Code
     } deriving (Eq, Ord, Show, Read)
 
 ------------------------------------------------------------------------
+
+newtype ClassRef = ClassRef { unClassRef :: Text }
+    deriving (Eq, Ord, Show, Read)
+
+data MethodRef = MethodRef
+    { mClass    :: ClassRef
+    , mNameType :: NameType
+    } deriving (Eq, Ord, Show, Read)
+
+data NameType = NameType
+    { nName :: Text
+    , nType :: Type
+    } deriving (Eq, Ord, Show, Read)
+
+------------------------------------------------------------------------
 -- Constant Pool
 
 data ConstPool = ConstPool
-    { cpNext    :: ConstRef
-    , cpValues  :: [ConstVal]
-    , cpUtf8s   :: Map Text     ConstRef
-    , cpClasses :: Map ClassRef ConstRef
+    { cpNext      :: ConstRef
+    , cpValues    :: [ConstVal]
+    , cpUtf8s     :: Map Text      ConstRef
+    , cpClasses   :: Map ClassRef  ConstRef
+    , cpMethods   :: Map MethodRef ConstRef
+    , cpNameTypes :: Map NameType  ConstRef
     } deriving (Eq, Ord, Show, Read)
 
 newtype ConstRef = ConstRef { unConstRef :: Word16 }
     deriving (Eq, Ord, Show, Read, Enum)
 
 data ConstVal =
-      ConstClass ConstRef
-    | ConstUtf8  Text
+      ConstUtf8     Text
+    | ConstClass    ConstRef
+    | ConstMethod   ConstRef ConstRef
+    | ConstNameType ConstRef ConstRef
     deriving (Eq, Ord, Show, Read)
 
 emptyConstPool :: ConstPool
-emptyConstPool = ConstPool (ConstRef 1) [] M.empty M.empty
+emptyConstPool = ConstPool (ConstRef 1) [] M.empty M.empty M.empty M.empty
 
 ------------------------------------------------------------------------
 
 newtype CP a = CP { unCP :: State ConstPool a }
-  deriving (Functor, Monad, MonadState ConstPool)
+  deriving (Functor, Applicative, Monad, MonadState ConstPool)
 
 runCP :: CP a -> (a, ConstPool)
 runCP m = runState (unCP m) emptyConstPool
@@ -166,6 +183,30 @@ addUtf8Ref utf8 = do
       Nothing -> do
         ref <- state (insertVal (ConstUtf8 utf8))
         modify (\cp -> cp { cpUtf8s = M.insert utf8 ref (cpUtf8s cp) })
+        return ref
+
+addNameType :: NameType -> CP ConstRef
+addNameType nt@(NameType name typ) = do
+    m <- gets (M.lookup nt . cpNameTypes)
+    case m of
+      Just x  -> return x
+      Nothing -> do
+        nref <- addUtf8Ref name
+        tref <- addUtf8Ref (unType typ)
+        ref  <- state (insertVal (ConstNameType nref tref))
+        modify (\cp -> cp { cpNameTypes = M.insert nt ref (cpNameTypes cp) })
+        return ref
+
+addMethodRef :: MethodRef -> CP ConstRef
+addMethodRef mr@(MethodRef cls nt) = do
+    m <- gets (M.lookup mr . cpMethods)
+    case m of
+      Just x  -> return x
+      Nothing -> do
+        cref <- addClassRef cls
+        nref <- addNameType nt
+        ref  <- state (insertVal (ConstMethod cref nref))
+        modify (\cp -> cp { cpMethods = M.insert mr ref (cpMethods cp) })
         return ref
 
 addClassRef :: ClassRef -> CP ConstRef
@@ -218,11 +259,14 @@ bConstPool ConstPool{..} = word16BE cpCount
   where
     cpCount = fromIntegral (length cpValues) + 1
 
-    go (ConstClass ref) = word8 7 <> bConstRef ref
-    go (ConstUtf8 txt)  = word8 1 <> word16BE n <> byteString bs
+    go (ConstUtf8 txt) = word8 1 <> word16BE n <> byteString bs
       where
         bs = T.encodeUtf8 txt
         n  = fromIntegral (B.length bs)
+
+    go (ConstClass ref)          = word8 7  <> bConstRef ref
+    go (ConstMethod cref nref)   = word8 10 <> bConstRef cref <> bConstRef nref
+    go (ConstNameType nref tref) = word8 12 <> bConstRef nref <> bConstRef tref
 
 bConstRef :: ConstRef -> Builder
 bConstRef = word16BE . unConstRef
@@ -232,6 +276,9 @@ bUtf8Ref = (bConstRef <$>) . addUtf8Ref
 
 bClassRef :: ClassRef -> CP Builder
 bClassRef = (bConstRef <$>) . addClassRef
+
+bMethodRef :: MethodRef -> CP Builder
+bMethodRef = (bConstRef <$>) . addMethodRef
 
 ------------------------------------------------------------------------
 
@@ -292,8 +339,16 @@ bCode Code{..} = do
 
 bInstruction :: Instruction -> CP Builder
 bInstruction i = case i of
-    BIPush x -> return (word8 0x10 <> int8 x)
-    IReturn  -> return (word8 0xac)
+    BIPush x -> pure (word8 0x10 <> int8 x)
+
+    IReturn -> pure (word8 0xac)
+    LReturn -> pure (word8 0xad)
+    FReturn -> pure (word8 0xae)
+    DReturn -> pure (word8 0xaf)
+    AReturn -> pure (word8 0xb0)
+    Return  -> pure (word8 0xb1)
+
+    InvokeStatic x -> (word8 0xb8 <>) <$> bMethodRef x
 
 ------------------------------------------------------------------------
 
@@ -604,11 +659,11 @@ data Instruction =
     | GetField  Word16      -- ^ 0xb4 - get field value of object, where the field is identified by #index in constant pool
     | PutField  Word16      -- ^ 0xb5 - set field value of object, where the field is identified by #index in constant pool
 
-    | InvokeVirtual	  Word16        -- ^ 0xb6 - invoke virtual method identified by #index in constant pool
-    | InvokeSpecial	  Word16        -- ^ 0xb7 - invoke instance method identified by #index in constant pool
-    | InvokeStatic    Word16        -- ^ 0xb8 - invoke static method identified by #index in constant pool
-    | InvokeInterface Word16 Word8  -- ^ 0xb9 - invoke interface method identified by #index in constant pool
-    | InvokeDynamic   Word16        -- ^ 0xba - invoke dynamic method identified by #index in constant pool
+    | InvokeVirtual	  MethodRef        -- ^ 0xb6 - invoke virtual method identified by #index in constant pool
+    | InvokeSpecial	  MethodRef        -- ^ 0xb7 - invoke instance method identified by #index in constant pool
+    | InvokeStatic    MethodRef        -- ^ 0xb8 - invoke static method identified by #index in constant pool
+    | InvokeInterface MethodRef Word8  -- ^ 0xb9 - invoke interface method identified by #index in constant pool
+    | InvokeDynamic   MethodRef        -- ^ 0xba - invoke dynamic method identified by #index in constant pool
 
     | New       Word16      -- ^ 0xbb - create new object of type identified by #index in constant pool
     | NewArray  Word8       -- ^ 0xbc - create new array with count elements of primitive type identified by #atype
