@@ -428,8 +428,8 @@ stackDiff i = case i of
     Return  -> 0
 
     GetStatic     _ -> 1
-    InvokeVirtual _ -> -1 -- need to count params
-    InvokeStatic  _ -> 0  -- need to count params
+    InvokeVirtual _ -> -1 -- TODO need to count params
+    InvokeStatic  _ -> 0  -- TODO need to count params
 
     x -> error ("stackDiff: Unknown instruction: " <> show x)
 
