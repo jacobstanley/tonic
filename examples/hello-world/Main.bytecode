@@ -1,0 +1,45 @@
+Compiled from "Main.java"
+class Main implements java.lang.Comparable {
+  static int foo;
+    Signature: I
+
+  Main();
+    Signature: ()V
+    Code:
+       0: aload_0       
+       1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+       4: return        
+    LineNumberTable:
+      line 1: 0
+
+  public static void main(java.lang.String[]);
+    Signature: ([Ljava/lang/String;)V
+    Code:
+       0: getstatic     #2                  // Field java/lang/System.out:Ljava/io/PrintStream;
+       3: ldc           #3                  // String Hello World!
+       5: invokevirtual #4                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       8: bipush        42
+      10: invokestatic  #5                  // Method java/lang/System.exit:(I)V
+      13: return        
+    LineNumberTable:
+      line 11: 0
+      line 12: 8
+      line 13: 13
+
+  public int compareTo(java.lang.Object);
+    Signature: (Ljava/lang/Object;)I
+    Code:
+       0: iconst_m1     
+       1: ireturn       
+    LineNumberTable:
+      line 28: 0
+
+  static {};
+    Signature: ()V
+    Code:
+       0: iconst_1      
+       1: putstatic     #6                  // Field foo:I
+       4: return        
+    LineNumberTable:
+      line 2: 0
+}

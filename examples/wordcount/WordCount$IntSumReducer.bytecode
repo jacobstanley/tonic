@@ -1,0 +1,73 @@
+Compiled from "WordCount.java"
+public class WordCount$IntSumReducer extends org.apache.hadoop.mapreduce.Reducer<org.apache.hadoop.io.Text, org.apache.hadoop.io.IntWritable, org.apache.hadoop.io.Text, org.apache.hadoop.io.IntWritable> {
+  private org.apache.hadoop.io.IntWritable result;
+    Signature: Lorg/apache/hadoop/io/IntWritable;
+
+  public WordCount$IntSumReducer();
+    Signature: ()V
+    Code:
+       0: aload_0       
+       1: invokespecial #1                  // Method org/apache/hadoop/mapreduce/Reducer."<init>":()V
+       4: aload_0       
+       5: new           #2                  // class org/apache/hadoop/io/IntWritable
+       8: dup           
+       9: invokespecial #3                  // Method org/apache/hadoop/io/IntWritable."<init>":()V
+      12: putfield      #4                  // Field result:Lorg/apache/hadoop/io/IntWritable;
+      15: return        
+    LineNumberTable:
+      line 29: 0
+      line 30: 4
+
+  public void reduce(org.apache.hadoop.io.Text, java.lang.Iterable<org.apache.hadoop.io.IntWritable>, org.apache.hadoop.mapreduce.Reducer<org.apache.hadoop.io.Text, org.apache.hadoop.io.IntWritable, org.apache.hadoop.io.Text, org.apache.hadoop.io.IntWritable>.Context) throws java.io.IOException, java.lang.InterruptedException;
+    Signature: (Lorg/apache/hadoop/io/Text;Ljava/lang/Iterable;Lorg/apache/hadoop/mapreduce/Reducer$Context;)V
+    Code:
+       0: iconst_0      
+       1: istore        4
+       3: aload_2       
+       4: invokeinterface #5,  1            // InterfaceMethod java/lang/Iterable.iterator:()Ljava/util/Iterator;
+       9: astore        5
+      11: aload         5
+      13: invokeinterface #6,  1            // InterfaceMethod java/util/Iterator.hasNext:()Z
+      18: ifeq          46
+      21: aload         5
+      23: invokeinterface #7,  1            // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      28: checkcast     #2                  // class org/apache/hadoop/io/IntWritable
+      31: astore        6
+      33: iload         4
+      35: aload         6
+      37: invokevirtual #8                  // Method org/apache/hadoop/io/IntWritable.get:()I
+      40: iadd          
+      41: istore        4
+      43: goto          11
+      46: aload_0       
+      47: getfield      #4                  // Field result:Lorg/apache/hadoop/io/IntWritable;
+      50: iload         4
+      52: invokevirtual #9                  // Method org/apache/hadoop/io/IntWritable.set:(I)V
+      55: aload_3       
+      56: aload_1       
+      57: aload_0       
+      58: getfield      #4                  // Field result:Lorg/apache/hadoop/io/IntWritable;
+      61: invokevirtual #10                 // Method org/apache/hadoop/mapreduce/Reducer$Context.write:(Ljava/lang/Object;Ljava/lang/Object;)V
+      64: return        
+    LineNumberTable:
+      line 33: 0
+      line 34: 3
+      line 35: 33
+      line 36: 43
+      line 37: 46
+      line 38: 55
+      line 39: 64
+
+  public void reduce(java.lang.Object, java.lang.Iterable, org.apache.hadoop.mapreduce.Reducer$Context) throws java.io.IOException, java.lang.InterruptedException;
+    Signature: (Ljava/lang/Object;Ljava/lang/Iterable;Lorg/apache/hadoop/mapreduce/Reducer$Context;)V
+    Code:
+       0: aload_0       
+       1: aload_1       
+       2: checkcast     #11                 // class org/apache/hadoop/io/Text
+       5: aload_2       
+       6: aload_3       
+       7: invokevirtual #12                 // Method reduce:(Lorg/apache/hadoop/io/Text;Ljava/lang/Iterable;Lorg/apache/hadoop/mapreduce/Reducer$Context;)V
+      10: return        
+    LineNumberTable:
+      line 29: 0
+}
