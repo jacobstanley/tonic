@@ -273,7 +273,22 @@ data Bytecode =
     | B'MonitorEnter          -- ^ 0xc2 - enter monitor for object ("grab the lock" - start of synchronized() section)
     | B'MonitorExit           -- ^ 0xc3 - exit monitor for object ("release the lock" - end of synchronized() section)
 
-    | B'Wide                  -- ^ 0xc4 - wide version of load/store/inc
+    | B'ILoad_W Word16        -- ^ 0xc4 0x15 - load an int value from a local variable #index
+    | B'LLoad_W Word16        -- ^ 0xc4 0x16 - load a long value from a local variable #index
+    | B'FLoad_W Word16        -- ^ 0xc4 0x17 - load a float value from a local variable #index
+    | B'DLoad_W Word16        -- ^ 0xc4 0x18 - load a double value from a local variable #index
+    | B'ALoad_W Word16        -- ^ 0xc4 0x19 - load a reference onto the stack from a local variable #index
+
+    | B'IStore_W Word16       -- ^ 0xc4 0x36 - store int value into variable #index
+    | B'LStore_W Word16       -- ^ 0xc4 0x37 - store a long value in a local variable #index
+    | B'FStore_W Word16       -- ^ 0xc4 0x38 - store a float value into a local variable #index
+    | B'DStore_W Word16       -- ^ 0xc4 0x39 - store a double value into a local variable #index
+    | B'AStore_W Word16       -- ^ 0xc4 0x3a - store a reference into a local variable #index
+
+    | B'IInc_W Word16 Int16   -- ^ 0xc4 0x84 - increment local variable #index by signed byte #const
+
+    | B'Ret_W Word16          -- ^ 0xc4 0xa9 - continue execution from address taken from a local variable #index
+                              --                 (the asymmetry with jsr_w is intentional)
 
     | B'MultiANewArray Word16 Word8 -- ^ 0xc5 - create a new array of #dimensions with elements of type #index in constant pool
 
@@ -485,7 +500,18 @@ bytecode bc = case bc of
     B'InstanceOf x        -> word8 0xc0 <> word16BE x
     B'MonitorEnter        -> word8 0xc2
     B'MonitorExit         -> word8 0xc3
-    B'Wide                -> error "JVM.Bytecode.bytecode: not implemented 0xc4"
+    B'ILoad_W x           -> word8 0xc4 <> word8 0x15 <> word16BE x
+    B'LLoad_W x           -> word8 0xc4 <> word8 0x16 <> word16BE x
+    B'FLoad_W x           -> word8 0xc4 <> word8 0x17 <> word16BE x
+    B'DLoad_W x           -> word8 0xc4 <> word8 0x18 <> word16BE x
+    B'ALoad_W x           -> word8 0xc4 <> word8 0x19 <> word16BE x
+    B'IStore_W x          -> word8 0xc4 <> word8 0x36 <> word16BE x
+    B'LStore_W x          -> word8 0xc4 <> word8 0x37 <> word16BE x
+    B'FStore_W x          -> word8 0xc4 <> word8 0x38 <> word16BE x
+    B'DStore_W x          -> word8 0xc4 <> word8 0x39 <> word16BE x
+    B'AStore_W x          -> word8 0xc4 <> word8 0x3a <> word16BE x
+    B'IInc_W v i          -> word8 0xc4 <> word8 0x84 <> word16BE v <> int16BE i
+    B'Ret_W x             -> word8 0xc4 <> word8 0xa9 <> word16BE x
     B'MultiANewArray d t  -> word8 0xc5 <> word16BE d <> word8 t
     B'IfNull    x         -> word8 0xc6 <> int16BE x
     B'IfNonNull x         -> word8 0xc7 <> int16BE x
