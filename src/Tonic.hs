@@ -14,123 +14,82 @@ import           JVM.Codegen
 
 ------------------------------------------------------------------------
 
-foo :: Term Name
-foo =
-    Let (LV 1 F32) (Ret (Imm 9 F32)) $
-    Let (LV 2 F32) (Ret (Imm 1 F32)) $
-    Let (LV 3 F32) (App (Op2 Add F32) [Var (LV 1 F32), Var (LV 2 F32)]) $
-    App float2string [Var (LV 3 F32)]
+pattern F32 = Fmt R 32
 
-foo1 :: Term Name
+foo0 :: Expr Name
+foo0 =
+    Let (Locl 1 F32) (Var (NLit 9 F32)) $
+    Let (Locl 2 F32) (Var (NLit 1 F32)) $
+    Let (Locl 3 F32) (Var (Prim Add F32) `App` Var (Locl 1 F32) `App` Var (Locl 2 F32)) $
+    Var float2string `App` Var (Locl 3 F32)
+
+foo1 :: Expr Name
 foo1 =
-    App (Op2 Add F32) [Imm 42 F32, Imm 18 F32]
+    Var (Prim Add F32) `App` Var (NLit 42 F32) `App` Var (NLit 18 F32)
 
-float2string :: Atom Name
-float2string = Var $ SM $ MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
+float2string :: Name
+float2string = SMth $ MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
+
+type Instructions = [Instruction]
+
+foo :: Expr Name
+foo = snd (unE expr 1)
+  where
+    expr = add `app` n1 `app` n2
+    add = lam $ \x -> lam $ \y -> var float2string `app` (var (Prim Add F32) `app` x `app` y)
+    n1 = var (NLit 1 F32)
+    n2 = var (NLit 9 F32)
+
+------------------------------------------------------------------------
+
+class Lambda exp where
+    lam :: (exp -> exp) -> exp
+    app :: exp -> (exp -> exp)
+
+newtype E = E { unE :: Integer -> (Integer, Expr Name) }
+
+instance Lambda E where
+    lam f = E $ \i -> let n      = Anon i               in
+                      let v      = E (\j -> (j, Var n)) in
+                      let (j, x) = unE (f v) (i+1)      in
+                      (j, Lam n x)
+
+    app f x = E $ \i -> let (j, f') = unE f i in
+                        let (k, x') = unE x j in
+                        (k, App f' x')
+
+var :: Name -> E
+var n = E (\i -> (i, Var n))
 
 ------------------------------------------------------------------------
 
 data Name =
-      LV VarIndex Format
-    | SF FieldRef
-    | IF FieldRef
-    | SM MethodRef
-    | VM MethodRef
+      Anon Integer         -- ^ an anonymous variable
+    | Locl VarIndex Format -- ^ local variable
+    | NLit Rational Format -- ^ numeric literal
+    | SLit Text            -- ^ string literal
+    | Prim PrimOp   Format -- ^ primitive operation
+    | IFld FieldRef        -- ^ instance field
+    | SFld FieldRef        -- ^ static field
+    | VMth MethodRef       -- ^ virtual method
+    | SMth MethodRef       -- ^ static method
     deriving (Eq, Ord, Show)
 
-pattern F32 = Fmt R 32
-
-type Instructions = [Instruction]
-
-------------------------------------------------------------------------
-
-compileFunc :: Term Name -> Instructions
-compileFunc term = compileTerm term <> pure AReturn
-
-compileTerm :: Term Name -> Instructions
-compileTerm term = case term of
-    Ret x                 -> compileAtom x
-    App f xs              -> concatMap compileAtom xs <> compileAtom f
-    Let (LV ix fmt) t1 t2 -> compileTerm t1 <> store ix fmt <> compileTerm t2
-
-    x -> error ("compileTerm: cannot generate instuctions for: " <> show x)
-
-compileAtom :: Atom Name -> Instructions
-compileAtom expr = case expr of
-    Var (LV ix fmt) -> load ix fmt
-    Var (SM ref)    -> pure (InvokeStatic ref)
-    Var (VM ref)    -> pure (InvokeVirtual ref)
-
-    Imm x (Fmt Z s) | s <= 32 -> pure (IConst (truncate x))
-                    | s <= 64 -> pure (LConst (truncate x))
-    Imm x (Fmt R s) | s <= 32 -> pure (FConst (fromRational x))
-                    | s <= 64 -> pure (DConst (fromRational x))
-
-    Op2 Add (Fmt Z s) | s <= 32 -> pure IAdd
-                      | s <= 64 -> pure LAdd
-    Op2 Add (Fmt R s) | s <= 32 -> pure FAdd
-                      | s <= 64 -> pure DAdd
-
-    x -> error ("compileAtom: cannot generate instuctions for: " <> show x)
-
-load :: VarIndex -> Format -> Instructions
-load ix fmt = case fmt of
-    (Fmt Z s) | s <= 32 -> pure (ILoad ix)
-              | s <= 64 -> pure (LLoad ix)
-    (Fmt R s) | s <= 32 -> pure (FLoad ix)
-              | s <= 64 -> pure (DLoad ix)
-    _ -> error ("load: cannot load: " <> show fmt)
-
-store :: VarIndex -> Format -> Instructions
-store ix fmt = case fmt of
-    (Fmt Z s) | s <= 32 -> pure (IStore ix)
-              | s <= 64 -> pure (LStore ix)
-    (Fmt R s) | s <= 32 -> pure (FStore ix)
-              | s <= 64 -> pure (DStore ix)
-    _ -> error ("store: cannot store: " <> show fmt)
-
-------------------------------------------------------------------------
-
-fvOfAtom :: Ord n => Atom n -> Set n
-fvOfAtom expr = case expr of
-    Var n   -> S.singleton n
-    Imm _ _ -> S.empty
-    Op1 _ _ -> S.empty
-    Op2 _ _ -> S.empty
-
-fvOfTerm :: Ord n => Term n -> Set n
-fvOfTerm term = case term of
-    Ret x       -> fvOfAtom x
-    App f xs    -> fvOfAtom f `S.union` S.unions (map fvOfAtom xs)
-    Let n t1 t2 -> fvOfTerm t1 `S.union` S.delete n (fvOfTerm t2)
-
-------------------------------------------------------------------------
-
-type Atoms n = [Atom n]
-
-data Atom n =
-      Var n               -- ^ variables
-    | Imm Rational Format -- ^ constants
-    | Op1 UnaryOp  Format -- ^ unary operations
-    | Op2 BinaryOp Format -- ^ binary operations
-    deriving (Eq, Ord, Show)
-
-data Term n =
-      Ret (Atom n)            -- ^ lifted atom
-    | App (Atom n) (Atoms n)  -- ^ function application
-    | Let n (Term n) (Term n) -- ^ monadic bindings
+data Expr n =
+      Var n
+    | Lam n (Expr n)
+    | App   (Expr n) (Expr n)
+    | Let n (Expr n) (Expr n)
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
 
-data UnaryOp =
+data PrimOp =
       Neg        -- ^ negation
     | Not        -- ^ logical NOT
     | Cnv Format -- ^ convert to format
-    deriving (Eq, Ord, Show)
 
-data BinaryOp =
-      Add -- ^ addition
+    | Add -- ^ addition
     | Sub -- ^ subtraction
     | Mul -- ^ multiplication
     | Div -- ^ division
@@ -150,7 +109,7 @@ data BinaryOp =
     | Cgt -- ^ greater than
     | Cle -- ^ less or equal
     | Cge -- ^ greater or equal
-    deriving (Eq, Ord, Enum, Show)
+    deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
 
@@ -164,3 +123,57 @@ data Genre =
     deriving (Eq, Ord, Enum, Show)
 
 type Size = Integer
+
+------------------------------------------------------------------------
+
+compileFunc :: Expr Name -> Instructions
+compileFunc term = compileExpr term <> pure AReturn
+
+compileExpr :: Expr Name -> Instructions
+compileExpr expr = case expr of
+    Var n       -> load n
+    App f x     -> compileExpr x <> compileExpr f
+    Let n x1 x2 -> compileExpr x1 <> store n <> compileExpr x2
+
+    x -> error ("compileExpr: cannot generate instuctions for: " <> show x)
+
+load :: Name -> Instructions
+load n = case n of
+    Locl i (Fmt Z s) | s <= 32 -> pure (ILoad i)
+                     | s <= 64 -> pure (LLoad i)
+    Locl i (Fmt R s) | s <= 32 -> pure (FLoad i)
+                     | s <= 64 -> pure (DLoad i)
+
+    NLit x (Fmt Z s) | s <= 32 -> pure (IConst (truncate x))
+                     | s <= 64 -> pure (LConst (truncate x))
+    NLit x (Fmt R s) | s <= 32 -> pure (FConst (fromRational x))
+                     | s <= 64 -> pure (DConst (fromRational x))
+    SLit x                     -> pure (SConst x)
+
+    Prim Add (Fmt Z s) | s <= 32 -> pure IAdd
+                       | s <= 64 -> pure LAdd
+    Prim Add (Fmt R s) | s <= 32 -> pure FAdd
+                       | s <= 64 -> pure DAdd
+
+    SMth ref -> pure (InvokeStatic ref)
+    VMth ref -> pure (InvokeVirtual ref)
+
+    _ -> error ("load: cannot load: " <> show n)
+
+store :: Name -> Instructions
+store n = case n of
+    Locl i (Fmt Z s) | s <= 32 -> pure (IStore i)
+                     | s <= 64 -> pure (LStore i)
+    Locl i (Fmt R s) | s <= 32 -> pure (FStore i)
+                     | s <= 64 -> pure (DStore i)
+
+    _ -> error ("store: cannot store to: " <> show n)
+
+------------------------------------------------------------------------
+
+fvOfExpr :: Ord n => Expr n -> Set n
+fvOfExpr expr = case expr of
+    Var n       -> S.singleton n
+    Lam n x     -> S.delete n (fvOfExpr x)
+    App f x     -> fvOfExpr f `S.union` fvOfExpr x
+    Let n x1 x2 -> fvOfExpr x1 `S.union` S.delete n (fvOfExpr x2)

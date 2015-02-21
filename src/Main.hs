@@ -30,7 +30,7 @@ import           Tonic
 main :: IO ()
 main = do
     print foo
-    print (fvOfTerm foo)
+    print (fvOfExpr foo)
 
     let xs = compileFunc foo
     print xs
