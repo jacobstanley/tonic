@@ -35,8 +35,8 @@ main = do
     let xs = compileFunc foo
     print xs
 
-    withFile "examples/Jvmc.class" WriteMode $ \h ->
-        hPutBuilder h $ bClass $ jvmc (Code 8 1 xs)
+    withFile "Jvmc.class" WriteMode $ \h ->
+        hPutBuilder h $ bClass $ jvmc (Code 8 8 xs)
 
 ------------------------------------------------------------------------
 
@@ -48,7 +48,7 @@ jvmc testCode = Class
     , cInterfaces = []
     , cFields     = [ Field [F'Static] "foo" (Type "I") ]
     , cMethods    = [ Method [M'Public, M'Static] "main" (Type "([Ljava/lang/String;)V") (Just code)
-                    , Method [M'Public, M'Static] "test" (Type "()V") (Just testCode)
+                    , Method [M'Public, M'Static] "test" (Type "()Ljava/lang/String;") (Just testCode)
                     ]
     , cSourceFile = Just "Jvmc.java"
     }
@@ -56,10 +56,17 @@ jvmc testCode = Class
     code = Code 8 1 [ GetStatic sysOut
                     , SConst "Hello World!"
                     , InvokeVirtual println
-                    , IConst (-1)
+
+                    , GetStatic sysOut
+                    , InvokeStatic test
+                    , InvokeVirtual println
+
+                    , IConst 42
                     , InvokeStatic sysExit
                     , Return ]
 
     sysOut  = FieldRef  (ClassRef "java/lang/System")    (NameType "out"     (Type "Ljava/io/PrintStream;"))
     sysExit = MethodRef (ClassRef "java/lang/System")    (NameType "exit"    (Type "(I)V"))
     println = MethodRef (ClassRef "java/io/PrintStream") (NameType "println" (Type "(Ljava/lang/String;)V"))
+
+    test = MethodRef (ClassRef "Jvmc") (NameType "test" (Type "()Ljava/lang/String;"))

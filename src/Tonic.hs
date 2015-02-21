@@ -1,4 +1,5 @@
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -w #-}
 
 module Tonic where
@@ -7,86 +8,117 @@ import           Control.Applicative
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
+import           Data.Text (Text)
 
 import           JVM.Codegen
 
 ------------------------------------------------------------------------
 
-foo0 :: Term Var
-foo0 =
-    Let (V I32 1) (Ret (Imm 42 I32)) $
-    Let (V I32 2) (Ret (Imm 18 I32)) $
-    Ret (Op2 Add I32 (Var (V I32 1))
-                     (Var (V I32 2)))
-
-foo :: Term Var
+foo :: Term Name
 foo =
-    Ret (Op2 Add I32 (Imm 42 I32)
-                     (Imm 18 I32))
+    Let (LV 1 F32) (Ret (Imm 9 F32)) $
+    Let (LV 2 F32) (Ret (Imm 1 F32)) $
+    Let (LV 3 F32) (App (Op2 Add F32) [Var (LV 1 F32), Var (LV 2 F32)]) $
+    App float2string [Var (LV 3 F32)]
+
+foo1 :: Term Name
+foo1 =
+    App (Op2 Add F32) [Imm 42 F32, Imm 18 F32]
+
+float2string :: Atom Name
+float2string = Var $ SM $ MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
 
 ------------------------------------------------------------------------
 
-data Var = V Format VarIndex
+data Name =
+      LV VarIndex Format
+    | SF FieldRef
+    | IF FieldRef
+    | SM MethodRef
+    | VM MethodRef
     deriving (Eq, Ord, Show)
 
-pattern I32 = Fmt Z 32
+pattern F32 = Fmt R 32
 
 type Instructions = [Instruction]
 
 ------------------------------------------------------------------------
 
-compileFunc :: Term Var -> Instructions
-compileFunc term = compileTerm term <> pure IReturn
+compileFunc :: Term Name -> Instructions
+compileFunc term = compileTerm term <> pure AReturn
 
-compileTerm :: Term Var -> Instructions
+compileTerm :: Term Name -> Instructions
 compileTerm term = case term of
-    Ret x       -> compileAtom x
-    Let v t1 t2 -> compileTerm t1 <> store v <> compileTerm t2
+    Ret x                 -> compileAtom x
+    App f xs              -> concatMap compileAtom xs <> compileAtom f
+    Let (LV ix fmt) t1 t2 -> compileTerm t1 <> store ix fmt <> compileTerm t2
 
     x -> error ("compileTerm: cannot generate instuctions for: " <> show x)
 
-compileAtom :: Atom Var -> Instructions
-compileAtom atom = case atom of
-    Var v           -> load v
-    Imm x I32       -> pure (IConst (round x))
-    Op2 Add I32 x y -> compileAtom x <> compileAtom y <> pure IAdd
+compileAtom :: Atom Name -> Instructions
+compileAtom expr = case expr of
+    Var (LV ix fmt) -> load ix fmt
+    Var (SM ref)    -> pure (InvokeStatic ref)
+    Var (VM ref)    -> pure (InvokeVirtual ref)
+
+    Imm x (Fmt Z s) | s <= 32 -> pure (IConst (truncate x))
+                    | s <= 64 -> pure (LConst (truncate x))
+    Imm x (Fmt R s) | s <= 32 -> pure (FConst (fromRational x))
+                    | s <= 64 -> pure (DConst (fromRational x))
+
+    Op2 Add (Fmt Z s) | s <= 32 -> pure IAdd
+                      | s <= 64 -> pure LAdd
+    Op2 Add (Fmt R s) | s <= 32 -> pure FAdd
+                      | s <= 64 -> pure DAdd
 
     x -> error ("compileAtom: cannot generate instuctions for: " <> show x)
 
-load :: Var -> Instructions
-load (V I32 x) = pure (ILoad x)
-load v         = error ("load: cannot load: " <> show v)
+load :: VarIndex -> Format -> Instructions
+load ix fmt = case fmt of
+    (Fmt Z s) | s <= 32 -> pure (ILoad ix)
+              | s <= 64 -> pure (LLoad ix)
+    (Fmt R s) | s <= 32 -> pure (FLoad ix)
+              | s <= 64 -> pure (DLoad ix)
+    _ -> error ("load: cannot load: " <> show fmt)
 
-store :: Var -> Instructions
-store (V I32 x) = pure (IStore x)
-store v         = error ("store: cannot store: " <> show v)
+store :: VarIndex -> Format -> Instructions
+store ix fmt = case fmt of
+    (Fmt Z s) | s <= 32 -> pure (IStore ix)
+              | s <= 64 -> pure (LStore ix)
+    (Fmt R s) | s <= 32 -> pure (FStore ix)
+              | s <= 64 -> pure (DStore ix)
+    _ -> error ("store: cannot store: " <> show fmt)
 
 ------------------------------------------------------------------------
 
-fvOfAtom :: Ord a => Atom a -> Set a
-fvOfAtom atom = case atom of
-    Var v         -> S.singleton v
-    Imm _ _       -> S.empty
-    Op1 _ _ x     -> fvOfAtom x
-    Op2 _ _ x1 x2 -> fvOfAtom x1 `S.union` fvOfAtom x2
+fvOfAtom :: Ord n => Atom n -> Set n
+fvOfAtom expr = case expr of
+    Var n   -> S.singleton n
+    Imm _ _ -> S.empty
+    Op1 _ _ -> S.empty
+    Op2 _ _ -> S.empty
 
-fvOfTerm :: Ord a => Term a -> Set a
+fvOfTerm :: Ord n => Term n -> Set n
 fvOfTerm term = case term of
     Ret x       -> fvOfAtom x
-    Let v t1 t2 -> fvOfTerm t1 `S.union` S.delete v (fvOfTerm t2)
+    App f xs    -> fvOfAtom f `S.union` S.unions (map fvOfAtom xs)
+    Let n t1 t2 -> fvOfTerm t1 `S.union` S.delete n (fvOfTerm t2)
 
 ------------------------------------------------------------------------
 
-data Atom v =
-      Var v                                 -- ^ variables
-    | Imm Rational Format                   -- ^ constants
-    | Op1 UnaryOp  Format (Atom v)          -- ^ unary operations
-    | Op2 BinaryOp Format (Atom v) (Atom v) -- ^ binary operations
+type Atoms n = [Atom n]
+
+data Atom n =
+      Var n               -- ^ variables
+    | Imm Rational Format -- ^ constants
+    | Op1 UnaryOp  Format -- ^ unary operations
+    | Op2 BinaryOp Format -- ^ binary operations
     deriving (Eq, Ord, Show)
 
-data Term v =
-      Ret (Atom v)            -- ^ lifted atom
-    | Let v (Term v) (Term v) -- ^ let binding
+data Term n =
+      Ret (Atom n)            -- ^ lifted atom
+    | App (Atom n) (Atoms n)  -- ^ function application
+    | Let n (Term n) (Term n) -- ^ monadic bindings
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
@@ -127,7 +159,7 @@ data Format = Fmt Genre Size
 
 data Genre =
       N -- ^ natural numbers
-    | Z -- ^ signed integers
+    | Z -- ^ integers
     | R -- ^ rationals
     deriving (Eq, Ord, Enum, Show)
 
