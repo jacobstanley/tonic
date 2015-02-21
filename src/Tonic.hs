@@ -1,10 +1,12 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS_GHC -w #-}
 
 module Tonic where
 
 import           Control.Applicative
+import           Control.Monad.State.Lazy
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
@@ -49,14 +51,18 @@ class Lambda exp where
 newtype E = E { unE :: Integer -> (Integer, Expr Name) }
 
 instance Lambda E where
-    lam f = E $ \i -> let n      = Anon i               in
-                      let v      = E (\j -> (j, Var n)) in
-                      let (j, x) = unE (f v) (i+1)      in
-                      (j, Lam n x)
+    lam f = E $ \i -> let
+              n      = Anon i
+              v      = E $ \j -> (j, Var n)
+              (j, x) = unE (f v) (i+1)
+            in
+              (j, Lam n x)
 
-    app f x = E $ \i -> let (j, f') = unE f i in
-                        let (k, x') = unE x j in
-                        (k, App f' x')
+    app f x = E $ \i -> let
+                (j, f') = unE f i
+                (k, x') = unE x j
+              in
+                (k, App f' x')
 
 var :: Name -> E
 var n = E (\i -> (i, Var n))
@@ -127,7 +133,7 @@ type Size = Integer
 ------------------------------------------------------------------------
 
 compileFunc :: Expr Name -> Instructions
-compileFunc term = compileExpr term <> pure AReturn
+compileFunc expr = compileExpr (betaReduce expr) <> pure AReturn
 
 compileExpr :: Expr Name -> Instructions
 compileExpr expr = case expr of
@@ -170,6 +176,40 @@ store n = case n of
     _ -> error ("store: cannot store to: " <> show n)
 
 ------------------------------------------------------------------------
+
+newtype Beta a = Beta { unBeta :: State Bool a }
+  deriving (Functor, Applicative, Monad, MonadState Bool)
+
+runBeta :: Beta a -> (a, Bool)
+runBeta m = runState (unBeta m) False
+
+betaReduce :: Eq n => Expr n -> Expr n
+betaReduce e = case runBeta (step e) of
+      (e', True)  -> betaReduce e'
+      (e', False) -> e'
+ where
+    step expr = case expr of
+      Var n       -> pure (Var n)
+      Lam n x     -> Lam <$> pure n <*> step x
+      Let n x1 x2 -> Let <$> pure n <*> step x1 <*> step x2
+
+      App (Lam n t) s -> pure (subst n s t) <* put True
+      App f x         -> App <$> step f <*> step x
+
+subst :: Eq n => n -> Expr n -> Expr n -> Expr n
+subst old new expr = case expr of
+    Var n | n == old  -> new
+          | otherwise -> Var n
+
+    Lam n x | n == old  -> Lam n x
+            | otherwise -> Lam n (subst' x)
+
+    App f x -> App (subst' f) (subst' x)
+
+    Let n x1 x2 | n == old  -> Let n (subst' x1) x2
+                | otherwise -> Let n (subst' x1) (subst' x2)
+  where
+    subst' = subst old new
 
 fvOfExpr :: Ord n => Expr n -> Set n
 fvOfExpr expr = case expr of

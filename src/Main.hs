@@ -31,6 +31,7 @@ main :: IO ()
 main = do
     print foo
     print (fvOfExpr foo)
+    print (betaReduce foo)
 
     let xs = compileFunc foo
     print xs
