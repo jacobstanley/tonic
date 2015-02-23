@@ -7,6 +7,8 @@ module Tonic where
 
 import           Control.Applicative
 import           Control.Monad.State.Lazy
+import           Data.Map (Map)
+import qualified Data.Map as M
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
@@ -18,103 +20,91 @@ import           JVM.Codegen
 
 pattern F32 = Fmt R 32
 
-foo0 :: Expr Name
+foo0 :: Term Int
 foo0 =
-    Let (Locl 1 F32) (Var (NLit 9 F32)) $
-    Let (Locl 2 F32) (Var (NLit 1 F32)) $
-    Let (Locl 3 F32) (Var (Prim Add F32) `App` Var (Locl 1 F32) `App` Var (Locl 2 F32)) $
-    Var float2string `App` Var (Locl 3 F32)
+    Let [x] (Copy [Num 9 F32]) $
+    Let [y] (Copy [Num 1 F32]) $
+    Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
+    Return (CallStatic float2string [Var z])
+  where
+    (x,y,z) = (1,2,3)
 
-foo1 :: Expr Name
+foo1 :: Term Int
 foo1 =
-    Var (Prim Add F32) `App` Var (NLit 42 F32) `App` Var (NLit 18 F32)
+    Let [x] (CallBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
+    Return (CallStatic float2string [Var x])
+  where
+    x = 1
 
-float2string :: Name
-float2string = SMth $ MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
+float2string :: MethodRef
+float2string = MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
 
 type Instructions = [Instruction]
 
-foo :: Expr Name
-foo = snd (unE expr 1)
-  where
-    expr = add `app` n1 `app` n2
-    add = lam $ \x -> lam $ \y -> var float2string `app` (var (Prim Add F32) `app` x `app` y)
-    n1 = var (NLit 1 F32)
-    n2 = var (NLit 9 F32)
-
 ------------------------------------------------------------------------
 
-class Lambda exp where
-    lam :: (exp -> exp) -> exp
-    app :: exp -> (exp -> exp)
-
-newtype E = E { unE :: Integer -> (Integer, Expr Name) }
-
-instance Lambda E where
-    lam f = E $ \i -> let
-              n      = Anon i
-              v      = E $ \j -> (j, Var n)
-              (j, x) = unE (f v) (i+1)
-            in
-              (j, Lam n x)
-
-    app f x = E $ \i -> let
-                (j, f') = unE f i
-                (k, x') = unE x j
-              in
-                (k, App f' x')
-
-var :: Name -> E
-var n = E (\i -> (i, Var n))
-
-------------------------------------------------------------------------
-
-data Name =
-      Anon Integer         -- ^ an anonymous variable
-    | Locl VarIndex Format -- ^ local variable
-    | NLit Rational Format -- ^ numeric literal
-    | SLit Text            -- ^ string literal
-    | Prim PrimOp   Format -- ^ primitive operation
-    | IFld FieldRef        -- ^ instance field
-    | SFld FieldRef        -- ^ static field
-    | VMth MethodRef       -- ^ virtual method
-    | SMth MethodRef       -- ^ static method
-    deriving (Eq, Ord, Show)
-
-data Expr n =
+data Atom n =
       Var n
-    | Lam n (Expr n)
-    | App   (Expr n) (Expr n)
-    | Let n (Expr n) (Expr n)
+    | Num Rational Format
+    | Str Text
+    deriving (Eq, Ord, Show)
+
+data Term n =
+      Return (Tail n)
+    | Let    [n] (Tail n) (Term n)
+    | LetRec (Map n (Binding n)) (Term n)
+    | Iff    (Atom n) (Term n) (Term n)
+    deriving (Eq, Ord, Show)
+
+data Binding n =
+      Lambda [n] (Term n)
+    | Const      (Term n)
+    deriving (Eq, Ord, Show)
+
+data Tail n =
+      Copy [Atom n]
+
+    | Call        (Atom n)  [Atom n]
+    | CallUnary   UnaryOp   (Atom n)
+    | CallBinary  BinaryOp  (Atom n) (Atom n)
+    | CallStatic  MethodRef [Atom n]
+    | CallVirtual MethodRef (Atom n) [Atom n]
+
+    | GetField  FieldRef (Atom n)
+    | SetField  FieldRef (Atom n) (Atom n)
+    | GetStatic FieldRef
+    | SetStatic FieldRef (Atom n)
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
 
-data PrimOp =
-      Neg        -- ^ negation
-    | Not        -- ^ logical NOT
-    | Cnv Format -- ^ convert to format
+data UnaryOp =
+      Neg Format        -- ^ negation
+    | Not Format        -- ^ logical NOT
+    | Cnv Format Format -- ^ convert from/to format
+    deriving (Eq, Ord, Show)
 
-    | Add -- ^ addition
-    | Sub -- ^ subtraction
-    | Mul -- ^ multiplication
-    | Div -- ^ division
-    | Rem -- ^ remainder
+data BinaryOp =
+      Add Format -- ^ addition
+    | Sub Format -- ^ subtraction
+    | Mul Format -- ^ multiplication
+    | Div Format -- ^ division
+    | Rem Format -- ^ remainder
 
-    | Shl -- ^ shift left
-    | Shr -- ^ shift right (arithmetic)
-    | Uhr -- ^ shift right (logical / unsigned)
+    | Sla Format -- ^ shift left  (arithmetic)
+    | Sra Format -- ^ shift right (arithmetic)
+    | Sru Format -- ^ shift right (unsigned / logical)
 
-    | And -- ^ bitwise AND
-    | Ior -- ^ bitwise Inclusive OR
-    | Xor -- ^ bitwise eXclusive OR
+    | And Format -- ^ bitwise AND
+    | Ior Format -- ^ bitwise Inclusive OR
+    | Xor Format -- ^ bitwise eXclusive OR
 
-    | Ceq -- ^ equal
-    | Cne -- ^ not equal
-    | Clt -- ^ less than
-    | Cgt -- ^ greater than
-    | Cle -- ^ less or equal
-    | Cge -- ^ greater or equal
+    | Ceq Format -- ^ equal
+    | Cne Format -- ^ not equal
+    | Clt Format -- ^ less than
+    | Cgt Format -- ^ greater than
+    | Cle Format -- ^ less or equal
+    | Cge Format -- ^ greater or equal
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
@@ -132,16 +122,17 @@ type Size = Integer
 
 ------------------------------------------------------------------------
 
-compileFunc :: Expr Name -> Instructions
-compileFunc expr = compileExpr (betaReduce expr) <> pure AReturn
+{-
+compileFunc :: Term Int -> Instructions
+compileFunc term = compileTerm term <> pure AReturn
 
-compileExpr :: Expr Name -> Instructions
-compileExpr expr = case expr of
+compileTerm :: Term Int -> Instructions
+compileTerm term = case term of
     Var n       -> load n
-    App f x     -> compileExpr x <> compileExpr f
-    Let n x1 x2 -> compileExpr x1 <> store n <> compileExpr x2
+    App f x     -> compileTerm x <> compileTerm f
+    Let n x1 x2 -> compileTerm x1 <> store n <> compileTerm x2
 
-    x -> error ("compileExpr: cannot generate instuctions for: " <> show x)
+    x -> error ("compileTerm: cannot generate instuctions for: " <> show x)
 
 load :: Name -> Instructions
 load n = case n of
@@ -183,12 +174,12 @@ newtype Beta a = Beta { unBeta :: State Bool a }
 runBeta :: Beta a -> (a, Bool)
 runBeta m = runState (unBeta m) False
 
-betaReduce :: Eq n => Expr n -> Expr n
+betaReduce :: Eq n => Term n -> Term n
 betaReduce e = case runBeta (step e) of
       (e', True)  -> betaReduce e'
       (e', False) -> e'
  where
-    step expr = case expr of
+    step term = case term of
       Var n       -> pure (Var n)
       Lam n x     -> Lam <$> pure n <*> step x
       Let n x1 x2 -> Let <$> pure n <*> step x1 <*> step x2
@@ -196,8 +187,8 @@ betaReduce e = case runBeta (step e) of
       App (Lam n t) s -> pure (subst n s t) <* put True
       App f x         -> App <$> step f <*> step x
 
-subst :: Eq n => n -> Expr n -> Expr n -> Expr n
-subst old new expr = case expr of
+subst :: Eq n => n -> Term n -> Term n -> Term n
+subst old new term = case term of
     Var n | n == old  -> new
           | otherwise -> Var n
 
@@ -211,9 +202,10 @@ subst old new expr = case expr of
   where
     subst' = subst old new
 
-fvOfExpr :: Ord n => Expr n -> Set n
-fvOfExpr expr = case expr of
+fvOfExpr :: Ord n => Term n -> Set n
+fvOfExpr term = case term of
     Var n       -> S.singleton n
     Lam n x     -> S.delete n (fvOfExpr x)
     App f x     -> fvOfExpr f `S.union` fvOfExpr x
     Let n x1 x2 -> fvOfExpr x1 `S.union` S.delete n (fvOfExpr x2)
+-}

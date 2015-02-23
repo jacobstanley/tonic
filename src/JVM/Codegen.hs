@@ -210,7 +210,7 @@ data Instruction =
     | FReturn
     | DReturn
     | AReturn
-    | Return
+    | VReturn
 
     deriving (Eq, Ord, Show, Read)
 ------------------------------------------------------------------------
@@ -623,7 +623,7 @@ bytecodeOfInstruction i = case i of
     FReturn -> pure B'FReturn
     DReturn -> pure B'DReturn
     AReturn -> pure B'AReturn
-    Return  -> pure B'Return
+    VReturn -> pure B'Return
 
     GetField  x -> B'GetField  . unConstRef <$> addFieldRef x
     PutField  x -> B'PutField  . unConstRef <$> addFieldRef x
