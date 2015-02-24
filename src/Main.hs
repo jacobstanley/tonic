@@ -22,34 +22,29 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word8, Word16)
 import           System.IO (IOMode(..), withFile)
 
-import           JVM.Codegen
-import           Tonic
+import           Tonic (foo0, fvOfTerm)
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    print foo
-    print (fvOfExpr foo)
-    print (betaReduce foo)
-
-    let xs = compileFunc foo
-    print xs
+    print foo0
+    print (fvOfTerm foo)
 
     withFile "Jvmc.class" WriteMode $ \h ->
-        hPutBuilder h $ bClass $ jvmc (Code 8 8 xs)
+        hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
 
 ------------------------------------------------------------------------
 
-jvmc :: Code -> Class
-jvmc testCode = Class
+jvmc :: Class
+jvmc = Class
     { cAccess     = [ C'Public, C'Final, C'Super ]
     , cName       = ClassRef "Jvmc"
     , cSuper      = ClassRef "java/lang/Object"
     , cInterfaces = []
     , cFields     = [ Field [F'Static] "foo" (Type "I") ]
     , cMethods    = [ Method [M'Public, M'Static] "main" (Type "([Ljava/lang/String;)V") (Just code)
-                    , Method [M'Public, M'Static] "test" (Type "()Ljava/lang/String;") (Just testCode)
+                    --, Method [M'Public, M'Static] "test" (Type "()Ljava/lang/String;") (Just testCode)
                     ]
     , cSourceFile = Just "Jvmc.java"
     }

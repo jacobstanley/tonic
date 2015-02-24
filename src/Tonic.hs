@@ -5,8 +5,8 @@
 
 module Tonic where
 
-import           Control.Applicative
 import           Control.Monad.State.Lazy
+import           Data.List (foldl')
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Monoid ((<>))
@@ -14,14 +14,19 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
 
-import           JVM.Codegen
-
 ------------------------------------------------------------------------
 
 pattern F32 = Fmt R 32
 
 foo0 :: Term Int
 foo0 =
+    Let [x] (CallBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
+    Return (CallStatic float2string [Var x])
+  where
+    x = 1
+
+foo1 :: Term Int
+foo1 =
     Let [x] (Copy [Num 9 F32]) $
     Let [y] (Copy [Num 1 F32]) $
     Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
@@ -29,17 +34,21 @@ foo0 =
   where
     (x,y,z) = (1,2,3)
 
-foo1 :: Term Int
-foo1 =
-    Let [x] (CallBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
-    Return (CallStatic float2string [Var x])
+foo2 :: Term String
+foo2 =
+    letrec [ (x, Lambda []  (Return (Copy [Num 9 F32])))
+           , (y, Const      (Return (Copy [Num 1 F32])))
+           , (f, Lambda [w] (Return (Copy [Var x])))
+           , (g, Lambda []  (Return (Copy [Var u]))) ] $
+    Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
+    Return (CallStatic float2string [Var t])
   where
-    x = 1
+    (x,y,z,w,u,t,f,g,h) = ("x","y","z","w","u","t","f","g","h")
 
-float2string :: MethodRef
-float2string = MethodRef (ClassRef "java/lang/Float") (NameType "toString" (Type "(F)Ljava/lang/String;"))
+    letrec bs t = LetRec (M.fromList bs) t
 
-type Instructions = [Instruction]
+float2string :: SMethod
+float2string = SMethod "java/lang/Float" "toString" [Float] (Just (Object "java/lang/String"))
 
 ------------------------------------------------------------------------
 
@@ -49,31 +58,34 @@ data Atom n =
     | Str Text
     deriving (Eq, Ord, Show)
 
-data Term n =
-      Return (Tail n)
-    | Let    [n] (Tail n) (Term n)
-    | LetRec (Map n (Binding n)) (Term n)
-    | Iff    (Atom n) (Term n) (Term n)
-    deriving (Eq, Ord, Show)
+type Bindings n = Map n (Binding n)
 
 data Binding n =
       Lambda [n] (Term n)
     | Const      (Term n)
     deriving (Eq, Ord, Show)
 
+data Term n =
+      Return (Tail n)
+    | Let    [n] (Tail n) (Term n)
+    | LetRec (Bindings n) (Term n)
+    | Iff    (Atom n) (Term n) (Term n)
+    deriving (Eq, Ord, Show)
+
 data Tail n =
       Copy [Atom n]
 
-    | Call        (Atom n)  [Atom n]
-    | CallUnary   UnaryOp   (Atom n)
-    | CallBinary  BinaryOp  (Atom n) (Atom n)
-    | CallStatic  MethodRef [Atom n]
-    | CallVirtual MethodRef (Atom n) [Atom n]
+    | Call        (Atom n) [Atom n]
+    | CallUnary   UnaryOp  (Atom n)
+    | CallBinary  BinaryOp (Atom n) (Atom n)
+    | CallVirtual IMethod  (Atom n) [Atom n]
+    | CallSpecial IMethod  (Atom n) [Atom n]
+    | CallStatic  SMethod  [Atom n]
 
-    | GetField  FieldRef (Atom n)
-    | SetField  FieldRef (Atom n) (Atom n)
-    | GetStatic FieldRef
-    | SetStatic FieldRef (Atom n)
+    | GetField  IField (Atom n)
+    | SetField  IField (Atom n) (Atom n)
+    | GetStatic SField
+    | SetStatic SField (Atom n)
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
@@ -122,90 +134,89 @@ type Size = Integer
 
 ------------------------------------------------------------------------
 
-{-
-compileFunc :: Term Int -> Instructions
-compileFunc term = compileTerm term <> pure AReturn
+-- | JVM types.
+data JType =
+      Boolean
+    | Byte
+    | Char
+    | Short
+    | Int
+    | Long
+    | Float
+    | Double
+    | Object Text
+    deriving (Eq, Ord, Show)
 
-compileTerm :: Term Int -> Instructions
-compileTerm term = case term of
-    Var n       -> load n
-    App f x     -> compileTerm x <> compileTerm f
-    Let n x1 x2 -> compileTerm x1 <> store n <> compileTerm x2
+type ClassName  = Text
+type MethodName = Text
+type FieldName  = Text
 
-    x -> error ("compileTerm: cannot generate instuctions for: " <> show x)
+-- | Instance method.
+data IMethod = IMethod ClassName MethodName [JType] (Maybe JType)
+    deriving (Eq, Ord, Show)
 
-load :: Name -> Instructions
-load n = case n of
-    Locl i (Fmt Z s) | s <= 32 -> pure (ILoad i)
-                     | s <= 64 -> pure (LLoad i)
-    Locl i (Fmt R s) | s <= 32 -> pure (FLoad i)
-                     | s <= 64 -> pure (DLoad i)
+-- | Static method.
+data SMethod = SMethod ClassName MethodName [JType] (Maybe JType)
+    deriving (Eq, Ord, Show)
 
-    NLit x (Fmt Z s) | s <= 32 -> pure (IConst (truncate x))
-                     | s <= 64 -> pure (LConst (truncate x))
-    NLit x (Fmt R s) | s <= 32 -> pure (FConst (fromRational x))
-                     | s <= 64 -> pure (DConst (fromRational x))
-    SLit x                     -> pure (SConst x)
+-- | Instance field.
+data IField = IField ClassName FieldName JType
+    deriving (Eq, Ord, Show)
 
-    Prim Add (Fmt Z s) | s <= 32 -> pure IAdd
-                       | s <= 64 -> pure LAdd
-    Prim Add (Fmt R s) | s <= 32 -> pure FAdd
-                       | s <= 64 -> pure DAdd
-
-    SMth ref -> pure (InvokeStatic ref)
-    VMth ref -> pure (InvokeVirtual ref)
-
-    _ -> error ("load: cannot load: " <> show n)
-
-store :: Name -> Instructions
-store n = case n of
-    Locl i (Fmt Z s) | s <= 32 -> pure (IStore i)
-                     | s <= 64 -> pure (LStore i)
-    Locl i (Fmt R s) | s <= 32 -> pure (FStore i)
-                     | s <= 64 -> pure (DStore i)
-
-    _ -> error ("store: cannot store to: " <> show n)
+-- | Static field.
+data SField = SField ClassName FieldName JType
+    deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
+-- Finding Free Variables
 
-newtype Beta a = Beta { unBeta :: State Bool a }
-  deriving (Functor, Applicative, Monad, MonadState Bool)
+fvOfAtom :: Ord n => Atom n -> Set n
+fvOfAtom e = case e of
+    Var x   -> S.singleton x
+    Num _ _ -> S.empty
+    Str _   -> S.empty
 
-runBeta :: Beta a -> (a, Bool)
-runBeta m = runState (unBeta m) False
+fvOfAtoms :: Ord n => [Atom n] -> Set n
+fvOfAtoms = S.unions . map fvOfAtom
 
-betaReduce :: Eq n => Term n -> Term n
-betaReduce e = case runBeta (step e) of
-      (e', True)  -> betaReduce e'
-      (e', False) -> e'
- where
-    step term = case term of
-      Var n       -> pure (Var n)
-      Lam n x     -> Lam <$> pure n <*> step x
-      Let n x1 x2 -> Let <$> pure n <*> step x1 <*> step x2
+fvOfBinding :: Ord n => Binding n -> Set n
+fvOfBinding e = case e of
+    Lambda ns x -> fvOfTerm x `differenceL` ns
+    Const     x -> fvOfTerm x
 
-      App (Lam n t) s -> pure (subst n s t) <* put True
-      App f x         -> App <$> step f <*> step x
+fvOfBindings :: Ord n => Bindings n -> Set n
+fvOfBindings = S.unions . map fvOfBinding . M.elems
 
-subst :: Eq n => n -> Term n -> Term n -> Term n
-subst old new term = case term of
-    Var n | n == old  -> new
-          | otherwise -> Var n
+bvOfBindings :: Ord n => Bindings n -> Set n
+bvOfBindings = M.keysSet
 
-    Lam n x | n == old  -> Lam n x
-            | otherwise -> Lam n (subst' x)
+fvOfTerm :: Ord n => Term n -> Set n
+fvOfTerm e = case e of
+    Return x      -> fvOfTail x
+    Let    ns x y -> fvOfTail x `S.union` (fvOfTerm y `differenceL` ns)
+    LetRec bs x   -> (fvOfBindings bs `S.union` fvOfTerm x) `S.difference` bvOfBindings bs
+    Iff    i t e  -> fvOfAtom i `S.union` fvOfTerm t `S.union` fvOfTerm e
 
-    App f x -> App (subst' f) (subst' x)
+fvOfTail :: Ord n => Tail n -> Set n
+fvOfTail e = case e of
+    Copy xs            -> fvOfAtoms xs
+    Call f xs          -> fvOfAtom f `S.union` fvOfAtoms xs
+    CallUnary   _ x    -> fvOfAtom x
+    CallBinary  _ x y  -> fvOfAtom x `S.union` fvOfAtom y
+    CallVirtual _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
+    CallSpecial _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
+    CallStatic  _   xs -> fvOfAtoms xs
+    GetField    _ i    -> fvOfAtom i
+    SetField    _ i x  -> fvOfAtom i `S.union` fvOfAtom x
+    GetStatic   _      -> S.empty
+    SetStatic   _   x  -> fvOfAtom x
 
-    Let n x1 x2 | n == old  -> Let n (subst' x1) x2
-                | otherwise -> Let n (subst' x1) (subst' x2)
-  where
-    subst' = subst old new
+------------------------------------------------------------------------
+-- Capture Avoiding Substitution
 
-fvOfExpr :: Ord n => Term n -> Set n
-fvOfExpr term = case term of
-    Var n       -> S.singleton n
-    Lam n x     -> S.delete n (fvOfExpr x)
-    App f x     -> fvOfExpr f `S.union` fvOfExpr x
-    Let n x1 x2 -> fvOfExpr x1 `S.union` S.delete n (fvOfExpr x2)
--}
+
+------------------------------------------------------------------------
+-- Utils
+
+differenceL :: Ord a => Set a -> [a] -> Set a
+differenceL s xs = S.difference s (S.fromList xs)
