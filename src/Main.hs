@@ -22,14 +22,16 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word8, Word16)
 import           System.IO (IOMode(..), withFile)
 
-import           Tonic (foo0, fvOfTerm)
+import           JVM.Codegen
+import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm)
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    print foo0
-    print (fvOfTerm foo)
+    print foo2
+    print (fvOfTerm foo2)
+    print (snd $ renameTerm ([100..]::[Int]) M.empty foo2)
 
     withFile "Jvmc.class" WriteMode $ \h ->
         hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
