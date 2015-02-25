@@ -323,6 +323,22 @@ substTerm subs term = case term of
                      in  LetRec (M.map (substBinding subs') bs) (substTerm subs' x)
 
 ------------------------------------------------------------------------
+-- Simplifier
+
+simplifyBinding :: Ord n => Binding n -> Binding n
+simplifyBinding binding = case binding of
+    Lambda ns x -> Lambda ns (simplifyTerm x)
+    Const     x -> Const     (simplifyTerm x)
+
+simplifyTerm :: Ord n => Term n -> Term n
+simplifyTerm term = case term of
+    Return x            -> Return x
+    Iff i t e           -> Iff i (simplifyTerm t) (simplifyTerm e)
+    Let ns (Copy ns') y -> simplifyTerm (substTerm (M.fromList (ns `zip` ns')) y)
+    Let ns x          y -> Let ns x (simplifyTerm y)
+    LetRec bs x         -> LetRec (M.map simplifyBinding bs) (simplifyTerm x)
+
+------------------------------------------------------------------------
 -- Utils
 
 setDifferenceL :: Ord a => Set a -> [a] -> Set a

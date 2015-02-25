@@ -23,17 +23,17 @@ import           Data.Word (Word8, Word16)
 import           System.IO (IOMode(..), withFile)
 
 import           JVM.Codegen
-import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm, substTerm, Atom(..))
+import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm, substTerm, simplifyTerm, Atom(..))
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    print foo2
-    print (fvOfTerm foo2)
-    print (snd $ renameTerm ([1..]::[Int]) M.empty foo2)
+    let rename = snd . renameTerm ([1..] :: [Int]) M.empty
 
-    print (substTerm (M.singleton "x" (Var "XXX")) foo2)
+    print foo1
+    print (fvOfTerm foo1)
+    print (rename $ simplifyTerm foo1)
 
     withFile "Jvmc.class" WriteMode $ \h ->
         hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
