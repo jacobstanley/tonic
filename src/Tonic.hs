@@ -192,7 +192,7 @@ fvOfTail tl = case tl of
 
 fvOfBinding :: Ord n => Binding n -> Set n
 fvOfBinding binding = case binding of
-    Lambda ns x -> fvOfTerm x `differenceL` ns
+    Lambda ns x -> fvOfTerm x `setDifferenceL` ns
     Const     x -> fvOfTerm x
 
 fvOfBindings :: Ord n => Bindings n -> Set n
@@ -205,7 +205,7 @@ fvOfTerm :: Ord n => Term n -> Set n
 fvOfTerm term = case term of
     Return x      -> fvOfTail x
     Iff    i t e  -> fvOfAtom i `S.union` fvOfTerm t `S.union` fvOfTerm e
-    Let    ns x y -> fvOfTail x `S.union` (fvOfTerm y `differenceL` ns)
+    Let    ns x y -> fvOfTail x `S.union` (fvOfTerm y `setDifferenceL` ns)
     LetRec bs x   -> (fvOfBindings bs `S.union` fvOfTerm x) `S.difference` bvOfBindings bs
 
 ------------------------------------------------------------------------
@@ -268,12 +268,12 @@ renameTerm :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Term a -> ([b]
 renameTerm gen names term = case term of
     Return x    -> (gen, Return (renameTail names x))
 
-    Iff   i t e -> let (gen1, t') = renameTerm gen  names t
+    Iff i t e   -> let (gen1, t') = renameTerm gen  names t
                        (gen2, e') = renameTerm gen1 names e
                    in
                        (gen2, Iff (renameAtom names i) t' e')
 
-    Let  ns x y -> let (ns', gen1) = splitAt (length ns) gen
+    Let ns x y  -> let (ns', gen1) = splitAt (length ns) gen
                        names'      = names // M.fromList (ns `zip` gen)
                        (gen2, y')  = renameTerm gen1 names' y
                    in
@@ -285,10 +285,54 @@ renameTerm gen names term = case term of
                        (gen2, LetRec bs' x')
 
 ------------------------------------------------------------------------
+-- Capture Avoiding Substitution
+
+substAtom :: Ord n => Map n (Atom n) -> Atom n -> Atom n
+substAtom subs atom = case atom of
+    Var x -> fromMaybe atom (M.lookup x subs)
+    _     -> atom
+
+substAtoms :: Ord n => Map n (Atom n) -> [Atom n] -> [Atom n]
+substAtoms subs = map (substAtom subs)
+
+substTail :: Ord n => Map n (Atom n) -> Tail n -> Tail n
+substTail subs tl = case tl of
+    Copy xs            -> Copy (substAtoms subs xs)
+    Call f xs          -> Call (substAtom subs f) (substAtoms subs xs)
+    CallUnary   o x    -> CallUnary   o (substAtom subs x)
+    CallBinary  o x y  -> CallBinary  o (substAtom subs x) (substAtom subs y)
+    CallVirtual m i xs -> CallVirtual m (substAtom subs i) (substAtoms subs xs)
+    CallSpecial m i xs -> CallSpecial m (substAtom subs i) (substAtoms subs xs)
+    CallStatic  m   xs -> CallStatic  m                    (substAtoms subs xs)
+    GetField    f i    -> GetField    f (substAtom subs i)
+    SetField    f i x  -> SetField    f (substAtom subs i) (substAtom subs x)
+    GetStatic   f      -> GetStatic   f
+    SetStatic   f   x  -> SetStatic   f (substAtom subs x)
+
+substBinding :: Ord n => Map n (Atom n) -> Binding n -> Binding n
+substBinding subs binding = case binding of
+    Lambda ns x -> Lambda ns (substTerm (subs `mapDifferenceL` ns) x)
+    Const     x -> Const     (substTerm subs x)
+
+substTerm :: Ord n => Map n (Atom n) -> Term n -> Term n
+substTerm subs term = case term of
+    Return x      -> Return (substTail subs x)
+    Iff    i t e  -> Iff (substAtom subs i) (substTerm subs t) (substTerm subs e)
+    Let    ns x y -> Let ns (substTail subs x) (substTerm (subs `mapDifferenceL` ns) y)
+    LetRec bs x   -> let subs' = subs `mapDifferenceS` bvOfBindings bs
+                     in  LetRec (M.map (substBinding subs') bs) (substTerm subs' x)
+
+------------------------------------------------------------------------
 -- Utils
 
-differenceL :: Ord a => Set a -> [a] -> Set a
-differenceL s xs = S.difference s (S.fromList xs)
+setDifferenceL :: Ord a => Set a -> [a] -> Set a
+setDifferenceL s xs = S.difference s (S.fromList xs)
+
+mapDifferenceL :: Ord k => Map k v -> [k] -> Map k v
+mapDifferenceL m xs = M.difference m (M.fromList (map (\x -> (x, ())) xs))
+
+mapDifferenceS :: Ord k => Map k v -> Set k -> Map k v
+mapDifferenceS m s = M.difference m (M.fromSet (const ()) s)
 
 unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
 unsafeLookup msg k kvs = fromMaybe (error msg') (M.lookup k kvs)
