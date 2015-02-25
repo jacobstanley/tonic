@@ -1,16 +1,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# OPTIONS_GHC -w #-}
 
 module Tonic where
 
-import           Control.Monad.State.Lazy
-import           Data.List (foldl')
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Maybe (fromMaybe)
-import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
@@ -40,11 +36,11 @@ foo2 =
     letrec [ (x, Lambda []  (Return (Copy [Num 9 F32])))
            , (y, Const      (Return (Copy [Num 1 F32])))
            , (f, Lambda [w] (Return (Copy [Var x])))
-           , (g, Lambda []  (Return (Copy [Var u]))) ] $
+           , (g, Lambda []  (Return (Copy [Var y]))) ] $
     Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
-    Return (CallStatic float2string [Var t])
+    Return (CallStatic float2string [Var z])
   where
-    (x,y,z,w,u,t,f,g,h) = ("x","y","z","w","u","t","f","g","h")
+    (x,y,z,w,f,g) = ("x","y","z","w","f","g")
 
     letrec bs t = LetRec (M.fromList bs) t
 
@@ -172,7 +168,7 @@ data SField = SField ClassName FieldName JType
 -- Finding Free Variables
 
 fvOfAtom :: Ord n => Atom n -> Set n
-fvOfAtom e = case e of
+fvOfAtom atom = case atom of
     Var x   -> S.singleton x
     Num _ _ -> S.empty
     Str _   -> S.empty
@@ -181,7 +177,7 @@ fvOfAtoms :: Ord n => [Atom n] -> Set n
 fvOfAtoms = S.unions . map fvOfAtom
 
 fvOfTail :: Ord n => Tail n -> Set n
-fvOfTail e = case e of
+fvOfTail tl = case tl of
     Copy xs            -> fvOfAtoms xs
     Call f xs          -> fvOfAtom f `S.union` fvOfAtoms xs
     CallUnary   _ x    -> fvOfAtom x
@@ -195,7 +191,7 @@ fvOfTail e = case e of
     SetStatic   _   x  -> fvOfAtom x
 
 fvOfBinding :: Ord n => Binding n -> Set n
-fvOfBinding e = case e of
+fvOfBinding binding = case binding of
     Lambda ns x -> fvOfTerm x `differenceL` ns
     Const     x -> fvOfTerm x
 
@@ -206,7 +202,7 @@ bvOfBindings :: Ord n => Bindings n -> Set n
 bvOfBindings = M.keysSet
 
 fvOfTerm :: Ord n => Term n -> Set n
-fvOfTerm e = case e of
+fvOfTerm term = case term of
     Return x      -> fvOfTail x
     Iff    i t e  -> fvOfAtom i `S.union` fvOfTerm t `S.union` fvOfTerm e
     Let    ns x y -> fvOfTail x `S.union` (fvOfTerm y `differenceL` ns)
@@ -215,17 +211,17 @@ fvOfTerm e = case e of
 ------------------------------------------------------------------------
 -- Renaming
 
-renameAtom :: Ord a => Map a b -> Atom a -> Atom b
-renameAtom names e = case e of
-    Var x   -> Var (unsafeLookup "renameAtom: name not found: " x names)
+renameAtom :: (Ord a, Show a, Show b) => Map a b -> Atom a -> Atom b
+renameAtom names atom = case atom of
+    Var x   -> Var (unsafeLookup "renameAtom: name not found" x names)
     Num x f -> Num x f
     Str x   -> Str x
 
-renameAtoms :: Ord a => Map a b -> [Atom a] -> [Atom b]
+renameAtoms :: (Ord a, Show a, Show b) => Map a b -> [Atom a] -> [Atom b]
 renameAtoms names = map (renameAtom names)
 
-renameTail :: Ord a => Map a b -> Tail a -> Tail b
-renameTail names e = case e of
+renameTail :: (Ord a, Show a, Show b) => Map a b -> Tail a -> Tail b
+renameTail names tl = case tl of
     Copy xs            -> Copy (renameAtoms names xs)
     Call f xs          -> Call (renameAtom names f) (renameAtoms names xs)
     CallUnary   o x    -> CallUnary   o (renameAtom names x)
@@ -238,16 +234,15 @@ renameTail names e = case e of
     GetStatic   f      -> GetStatic   f
     SetStatic   f   x  -> SetStatic   f (renameAtom names x)
 
-
-renameBindings :: (Ord a, Ord b) => [b] -> Map a b -> Bindings a -> ([b], Map a b, Bindings b)
+renameBindings :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Bindings a -> ([b], Map a b, Bindings b)
 renameBindings gen names as = (gen2, names', bs)
   where
     gen1       = drop (M.size as) gen
     names'     = names // M.fromList (M.keys as `zip` gen)
     (gen2, bs) = renameBindingsList gen1 names' (M.toList as)
 
-renameBindingsList :: (Ord a, Ord b) => [b] -> Map a b -> [(a, Binding a)] -> ([b], Bindings b)
-renameBindingsList gen names xs = case xs of
+renameBindingsList :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> [(a, Binding a)] -> ([b], Bindings b)
+renameBindingsList gen names bindings = case bindings of
 
     [(k, Lambda ns x)] -> let (ns', gen1) = splitAt (length ns) gen
                               names'      = names // M.fromList (ns `zip` gen)
@@ -269,8 +264,8 @@ renameBindingsList gen names xs = case xs of
                   (gen2, bs1 `M.union` bs2)
 
 
-renameTerm :: (Ord a, Ord b) => [b] -> Map a b -> Term a -> ([b], Term b)
-renameTerm gen names e = case e of
+renameTerm :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Term a -> ([b], Term b)
+renameTerm gen names term = case term of
     Return x    -> (gen, Return (renameTail names x))
 
     Iff   i t e -> let (gen1, t') = renameTerm gen  names t
@@ -295,8 +290,10 @@ renameTerm gen names e = case e of
 differenceL :: Ord a => Set a -> [a] -> Set a
 differenceL s xs = S.difference s (S.fromList xs)
 
-unsafeLookup :: Ord k => String -> k -> Map k v -> v
-unsafeLookup msg k kvs = fromMaybe (error msg) (M.lookup k kvs)
+unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
+unsafeLookup msg k kvs = fromMaybe (error msg') (M.lookup k kvs)
+  where
+    msg' = msg ++ ": " ++ show k ++ " in " ++ show (M.toList kvs)
 
 (//) :: Ord k => Map k v -> Map k v -> Map k v
-(//) = M.unionWith (\mk nk -> nk)
+(//) = M.unionWith (\_ x -> x)

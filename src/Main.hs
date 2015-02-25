@@ -31,7 +31,7 @@ main :: IO ()
 main = do
     print foo2
     print (fvOfTerm foo2)
-    print (snd $ renameTerm ([100..]::[Int]) M.empty foo2)
+    print (snd $ renameTerm ([1..]::[Int]) M.empty foo2)
 
     withFile "Jvmc.class" WriteMode $ \h ->
         hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
