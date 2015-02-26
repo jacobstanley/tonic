@@ -22,14 +22,19 @@ foo0 =
   where
     x = 1
 
-foo1 :: Term Int
+foo1 :: Term String
 foo1 =
     Let [x] (Copy [Num 9 F32]) $
     Let [y] (Copy [Num 1 F32]) $
+    Let [w] (Copy [Num 42 F32]) $
+    letrec [ (u, Const     (Return (Copy [Num 42 F32])))
+           , (t, Lambda [] (Return (Copy [Num 1 F32]))) ] $
     Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
     Return (CallStatic float2string [Var z])
   where
-    (x,y,z) = (1,2,3)
+    (x,y,z,w,u,t) = ("x","y","z","w","u","t")
+
+    letrec bs tm = LetRec (M.fromList bs) tm
 
 foo2 :: Term String
 foo2 =
@@ -333,10 +338,39 @@ simplifyBinding binding = case binding of
 simplifyTerm :: Ord n => Term n -> Term n
 simplifyTerm term = case term of
     Return x            -> Return x
+    Iff (Num 0 _) _ e   -> simplifyTerm e
+    Iff (Num _ _) t _   -> simplifyTerm t
     Iff i t e           -> Iff i (simplifyTerm t) (simplifyTerm e)
     Let ns (Copy ns') y -> simplifyTerm (substTerm (M.fromList (ns `zip` ns')) y)
     Let ns x          y -> Let ns x (simplifyTerm y)
     LetRec bs x         -> LetRec (M.map simplifyBinding bs) (simplifyTerm x)
+
+------------------------------------------------------------------------
+-- Dead Code Elimation
+
+deadBinding :: Ord n => Binding n -> Binding n
+deadBinding binding = case binding of
+    Lambda ns x -> Lambda ns (deadTerm x)
+    Const     x -> Const     (deadTerm x)
+
+deadTerm :: Ord n => Term n -> Term n
+deadTerm term = case term of
+    Return x    -> Return x
+    Iff i t e   -> Iff i (deadTerm t) (deadTerm e)
+
+    Let ns x y  -> let y'  = deadTerm y
+                       fvs = fvOfTerm y'
+                   in
+                       if S.null (setIntersectionL fvs ns)
+                       then y'
+                       else Let ns x y'
+
+    LetRec bs x -> let x'  = deadTerm x
+                       bs' = M.map deadBinding bs
+                   in
+                       if M.null bs
+                       then x'
+                       else LetRec bs' x'
 
 ------------------------------------------------------------------------
 -- Utils
@@ -344,14 +378,20 @@ simplifyTerm term = case term of
 setDifferenceL :: Ord a => Set a -> [a] -> Set a
 setDifferenceL s xs = S.difference s (S.fromList xs)
 
+setIntersectionL :: Ord a => Set a -> [a] -> Set a
+setIntersectionL s xs = S.intersection s (S.fromList xs)
+
 mapDifferenceL :: Ord k => Map k v -> [k] -> Map k v
 mapDifferenceL m xs = M.difference m (M.fromList (map (\x -> (x, ())) xs))
 
 mapDifferenceS :: Ord k => Map k v -> Set k -> Map k v
 mapDifferenceS m s = M.difference m (M.fromSet (const ()) s)
 
+mapIntersectionS :: Ord k => Map k v -> Set k -> Map k v
+mapIntersectionS m s = M.intersection m (M.fromSet (const ()) s)
+
 unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
-unsafeLookup msg k kvs = fromMaybe (error msg') (M.lookup k kvs)
+unsafeLookup msg k kvs = M.findWithDefault (error msg') k kvs
   where
     msg' = msg ++ ": " ++ show k ++ " in " ++ show (M.toList kvs)
 
