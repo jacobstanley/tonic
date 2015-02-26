@@ -24,16 +24,17 @@ import           System.IO (IOMode(..), withFile)
 
 import qualified JVM.Codegen as G
 import           JVM.Codegen hiding (Instruction(..))
-import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm)
+import           Tonic (foo0, foo1, foo2)
+import           Tonic (fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm, inlineTerm)
 import           Tonic.Pretty
 import           Tonic.Types
+
+import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 ------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-    let rename = snd . renameTerm ([1..] :: [Int]) M.empty
-
     -- print foo2
     -- print (fvOfTerm foo2)
     -- print (rename $ simplifyTerm foo2)
@@ -43,6 +44,17 @@ main = do
 
     withFile "Jvmc.class" WriteMode $ \h ->
         hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
+
+------------------------------------------------------------------------
+
+newtype Var = V Int
+    deriving (Eq, Ord, Enum, Show, Read)
+
+instance PP.Pretty Var where
+    pretty (V x) = PP.text "x" PP.<> PP.int x
+
+rename :: (Ord n, Show n) => Term n -> Term Var
+rename = snd . renameTerm [V 1..] M.empty
 
 ------------------------------------------------------------------------
 

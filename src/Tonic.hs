@@ -39,14 +39,16 @@ foo1 =
 
 foo2 :: Term String
 foo2 =
-    letrec [ (x, Lambda []  (Return (Copy [Num 9 F32])))
-           , (y, Const      (Return (Copy [Num 1 F32])))
-           , (f, Lambda [w] (Return (Copy [Var x])))
-           , (g, Lambda []  (Return (Copy [Var y]))) ] $
-    Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
-    Return (CallStatic float2string [Var z])
+    letrec [ (x,     Const        (Return (Copy [Num 9 F32])))
+           , (y,     Const        (Return (Copy [Num 1 F32])))
+           , (add,   Lambda [x,y] (Return (CallBinary (Add F32) (Var x) (Var y))))
+           , (toStr, Lambda [n]   (Return (CallStatic float2string [Var n])))
+           , (f,     Lambda [w]   (Return (Copy [Var x])))
+           , (g,     Lambda []    (Return (Copy [Var y]))) ] $
+    Let [z] (Call (Var add) [Var x, Var y]) $
+    Return (Call (Var toStr) [Var z])
   where
-    (x,y,z,w,f,g) = ("x","y","z","w","f","g")
+    (x,y,z,w,f,g,n,add,toStr) = ("x","y","z","w","f","g","n","add","toStr")
 
     letrec bs t = LetRec (M.fromList bs) t
 
@@ -105,7 +107,7 @@ fvOfTerm term = case term of
 
 renameAtom :: (Ord a, Show a, Show b) => Map a b -> Atom a -> Atom b
 renameAtom names atom = case atom of
-    Var x   -> Var (unsafeLookup "renameAtom: name not found" x names)
+    Var x   -> Var (unsafeLookup "renameAtom" x names)
     Num x f -> Num x f
     Str x   -> Str x
 
@@ -139,12 +141,12 @@ renameBindingsList gen names bindings = case bindings of
     [(k, Lambda ns x)] -> let (ns', gen1) = splitAt (length ns) gen
                               names'      = names // M.fromList (ns `zip` gen)
                               (gen2, x')  = renameTerm gen1 names' x
-                              k'          = unsafeLookup "renameBindingsList: name not found" k names
+                              k'          = unsafeLookup "renameBindingsList" k names
                           in
                               (gen2, M.singleton k' (Lambda ns' x'))
 
     [(k, Const x)]     -> let (gen', x') = renameTerm gen names x
-                              k'         = unsafeLookup "renameBindingsList: name not found" k names
+                              k'         = unsafeLookup "renameBindingsList" k names
                           in
                               (gen', M.singleton k' (Const x'))
 
@@ -253,11 +255,58 @@ deadTerm term = case term of
                        else Let ns x y'
 
     LetRec bs x -> let x'  = deadTerm x
-                       bs' = M.map deadBinding bs
+                       fvs = fvOfTerm x'
+                       bs' = findRequired fvs (M.map deadBinding bs)
                    in
-                       if M.null bs
+                       if M.null bs'
                        then x'
                        else LetRec bs' x'
+
+findRequired :: Ord n => Set n -> Bindings n -> Bindings n
+findRequired vs bs | vs == vs' = bs'
+                   | otherwise = findRequired vs' bs
+  where
+    bs' = bs `mapIntersectionS` vs
+    vs' = vs `S.union` fvOfBindings bs'
+
+------------------------------------------------------------------------
+-- Inliner
+
+inlineBinding :: (Ord n, Show n) => Bindings n -> Binding n -> Binding n
+inlineBinding env binding = case binding of
+    Lambda ns x -> Lambda ns (inlineTerm (env `mapDifferenceL` ns) x)
+    Const     x -> Const     (inlineTerm env x)
+
+inlineTerm :: (Ord n, Show n) => Bindings n -> Term n -> Term n
+inlineTerm env term = case term of
+    Return (Call (Var f) xs) ->
+      case unsafeLookup "inlineTerm" f env of
+        Lambda ns tm -> inlineTerm env $ substTerm (M.fromList (ns `zip` xs)) tm
+        _            -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
+
+    Return x  -> Return x
+    Iff i t e -> Iff i (inlineTerm env t) (inlineTerm env e)
+
+    Let ns (Call (Var f) xs) y ->
+      case unsafeLookup "inlineTerm" f env of
+        Lambda ns' tm -> inlineTerm env $ letTerm ns (substTerm (M.fromList (ns' `zip` xs)) tm) y
+        _             -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
+
+    Let ns x y  -> Let ns x (inlineTerm env y)
+
+    -- XXX check this knot tying is ok
+    LetRec bs x -> let bs'  = M.map (inlineBinding env') bs
+                       env' = env // bs'
+                       x'   = inlineTerm env' x
+                   in
+                       LetRec bs' x'
+
+letTerm :: [n] -> Term n -> Term n -> Term n
+letTerm ns term cont = case term of
+    Return x    -> Let ns x cont
+    Iff i t e   -> Iff i (letTerm ns t cont) (letTerm ns e cont)
+    Let ns' x y -> Let ns' x (letTerm ns y cont)
+    LetRec bs x -> LetRec bs (letTerm ns x cont)
 
 ------------------------------------------------------------------------
 -- Utils
@@ -280,7 +329,7 @@ mapIntersectionS m s = M.intersection m (M.fromSet (const ()) s)
 unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
 unsafeLookup msg k kvs = M.findWithDefault (error msg') k kvs
   where
-    msg' = msg ++ ": " ++ show k ++ " in " ++ show (M.toList kvs)
+    msg' = msg ++ ": name not found: " ++ show k ++ " in " ++ show (M.toList kvs)
 
 (//) :: Ord k => Map k v -> Map k v -> Map k v
 (//) = M.unionWith (\_ x -> x)

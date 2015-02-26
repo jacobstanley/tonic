@@ -55,7 +55,8 @@ ppBinding binding = case binding of
     Const     x -> ppTerm x
 
 ppBindings :: Pretty n => Map n (Binding n) -> Doc
-ppBindings = align . vcat . map go . M.toList
+ppBindings bs | M.null bs = tuple []
+              | otherwise = align . vcat . map go $ M.toList bs
   where
     go (n, b) = ppNames [n] <+> op "=" <+> align (ppBinding b)
 
@@ -125,6 +126,6 @@ letName :: Pretty a => a -> Doc
 letName x = magenta (pretty x)
 
 tuple :: [Doc] -> Doc
-tuple []  = dullyellow (lparen <> rparen)
+tuple []  = dullblack (lparen <> rparen)
 tuple [x] = x
-tuple xs  = parens . hcat $ punctuate (comma <> space) xs
+tuple xs  = dullblack (parens . hcat $ punctuate (comma <> space) xs)
