@@ -22,8 +22,11 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word8, Word16)
 import           System.IO (IOMode(..), withFile)
 
-import           JVM.Codegen
-import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm, Atom(..))
+import qualified JVM.Codegen as G
+import           JVM.Codegen hiding (Instruction(..))
+import           Tonic (foo0, foo1, foo2, fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm)
+import           Tonic.Pretty
+import           Tonic.Types
 
 ------------------------------------------------------------------------
 
@@ -56,17 +59,17 @@ jvmc = Class
     , cSourceFile = Just "Jvmc.java"
     }
   where
-    code = Code 8 1 [ GetStatic sysOut
-                    , SConst "Hello World!"
-                    , InvokeVirtual println
+    code = Code 8 1 [ G.GetStatic sysOut
+                    , G.SConst "Hello World!"
+                    , G.InvokeVirtual println
 
-                    , GetStatic sysOut
-                    , InvokeStatic test
-                    , InvokeVirtual println
+                    , G.GetStatic sysOut
+                    , G.InvokeStatic test
+                    , G.InvokeVirtual println
 
-                    , IConst 42
-                    , InvokeStatic sysExit
-                    , Return ]
+                    , G.IConst 42
+                    , G.InvokeStatic sysExit
+                    , G.Return ]
 
     sysOut  = FieldRef  (ClassRef "java/lang/System")    (NameType "out"     (Type "Ljava/io/PrintStream;"))
     sysExit = MethodRef (ClassRef "java/lang/System")    (NameType "exit"    (Type "(I)V"))
