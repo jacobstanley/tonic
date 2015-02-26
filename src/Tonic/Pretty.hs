@@ -24,9 +24,10 @@ printTail tl = putDoc (ppTail tl) >> putStrLn ""
 ------------------------------------------------------------------------
 
 ppAtom :: Pretty n => Atom n -> Doc
-ppAtom (Var x)     = var x
-ppAtom (Num x fmt) = red (num x) <> dullred (ppFormat fmt)
-ppAtom (Str x)     = dullgreen (dquotes (text (T.unpack x)))
+ppAtom atom = case atom of
+    Var x     -> var x
+    Num x fmt -> red (num x) <> dullred (ppFormat fmt)
+    Str x     -> dullgreen (dquotes (text (T.unpack x)))
 
 ppAtoms :: Pretty n => [Atom n] -> Doc
 ppAtoms = tuple . map ppAtom
@@ -35,21 +36,23 @@ ppNames :: Pretty n => [n] -> Doc
 ppNames = tuple . map letName
 
 ppTail :: Pretty n => Tail n -> Doc
-ppTail (Copy xs)            = ppAtoms xs
-ppTail (Call f xs)          = ppAtom f <+> ppAtoms xs
-ppTail (CallUnary   o x)    = ppUnaryOp o <> ppAtom x
-ppTail (CallBinary  o x y)  = ppAtom x <+> ppBinaryOp o <+> ppAtom y
-ppTail (CallStatic  m   xs) = kw "callstatic"  <+> ppSMethod m <+> ppAtoms xs
-ppTail (CallVirtual m i xs) = kw "callvirtual" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
-ppTail (CallSpecial m i xs) = kw "callspecial" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
-ppTail (GetField    f i)    = kw "getfield"    <+> ppIField  f <+> ppAtom i
-ppTail (SetField    f i x)  = kw "setfield"    <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
-ppTail (GetStatic   f)      = kw "getstatic"   <+> ppSField  f
-ppTail (SetStatic   f x)    = kw "setstatic"   <+> ppSField  f <+> op "<-" <+> ppAtom x
+ppTail tl = case tl of
+    Copy xs            -> ppAtoms xs
+    Call f xs          -> ppAtom f <+> ppAtoms xs
+    CallUnary   o x    -> ppUnaryOp o <> ppAtom x
+    CallBinary  o x y  -> ppAtom x <+> ppBinaryOp o <+> ppAtom y
+    CallStatic  m   xs -> kw "callstatic"  <+> ppSMethod m <+> ppAtoms xs
+    CallVirtual m i xs -> kw "callvirtual" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
+    CallSpecial m i xs -> kw "callspecial" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
+    GetField    f i    -> kw "getfield"    <+> ppIField  f <+> ppAtom i
+    SetField    f i x  -> kw "setfield"    <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
+    GetStatic   f      -> kw "getstatic"   <+> ppSField  f
+    SetStatic   f x    -> kw "setstatic"   <+> ppSField  f <+> op "<-" <+> ppAtom x
 
 ppBinding :: Pretty n => Binding n -> Doc
-ppBinding (Lambda ns x) = op "\\" <> ppNames ns <+> op "->" <+> ppTerm x
-ppBinding (Const     x) = ppTerm x
+ppBinding binding = case binding of
+    Lambda ns x -> op "\\" <> ppNames ns <+> op "->" <+> ppTerm x
+    Const     x -> ppTerm x
 
 ppBindings :: Pretty n => Map n (Binding n) -> Doc
 ppBindings = align . vcat . map go . M.toList
@@ -57,23 +60,31 @@ ppBindings = align . vcat . map go . M.toList
     go (n, b) = ppNames [n] <+> op "=" <+> align (ppBinding b)
 
 ppTerm :: Pretty n => Term n -> Doc
-ppTerm (Return x)    = ppTail x
-ppTerm (Iff i t e)   = kw "if" <+> ppAtom i </> kw "then" <+> ppTerm t
-                                            </> kw "else" <+> ppTerm e
-ppTerm (Let ns x y)  = kw "let" <+> ppNames ns
-                                <+> op "=" <+> align (ppTail x)
-                                <+> kw "in" <$> ppTerm y
+ppTerm term = case term of
+    Return x    -> ppTail x
 
-ppTerm (LetRec bs x) = kw "letrec" <+> ppBindings bs <+> kw "in" <$> ppTerm x
+    Iff i t e   -> kw "if" <+> ppAtom i </> kw "then" <+> ppTerm t
+                                        </> kw "else" <+> ppTerm e
+
+    Let ns x y  -> kw "let" <+> ppNames ns
+                            <+> op "=" <+> align (ppTail x)
+                            <+> kw "in"
+                            <$> ppTerm y
+
+    LetRec bs x -> kw "letrec" <+> ppBindings bs
+                               <+> kw "in"
+                               <$> ppTerm x
 
 ------------------------------------------------------------------------
 
 ppUnaryOp :: UnaryOp -> Doc
-ppUnaryOp _ = error "ppUnaryOp"
+ppUnaryOp o = case o of
+    _ -> error "ppUnaryOp"
 
 ppBinaryOp :: BinaryOp -> Doc
-ppBinaryOp (Add f) = op "+" <> dullred (ppFormat f)
-ppBinaryOp _       = error "ppBinaryOp"
+ppBinaryOp o = case o of
+    Add f -> op "+" <> dullred (ppFormat f)
+    _     -> error "ppBinaryOp"
 
 ppFormat :: Format -> Doc
 ppFormat (Fmt N sz) = text "`U" <> integer sz
