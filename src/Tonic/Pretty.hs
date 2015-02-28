@@ -37,17 +37,17 @@ ppNames = tuple . map letName
 
 ppTail :: Pretty n => Tail n -> Doc
 ppTail tl = case tl of
-    Copy xs            -> ppAtoms xs
-    Call f xs          -> ppAtom f <+> ppAtoms xs
-    CallUnary   o x    -> ppUnaryOp o <> ppAtom x
-    CallBinary  o x y  -> ppAtom x <+> ppBinaryOp o <+> ppAtom y
-    CallStatic  m   xs -> kw "callstatic"  <+> ppSMethod m <+> ppAtoms xs
-    CallVirtual m i xs -> kw "callvirtual" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
-    CallSpecial m i xs -> kw "callspecial" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
-    GetField    f i    -> kw "getfield"    <+> ppIField  f <+> ppAtom i
-    SetField    f i x  -> kw "setfield"    <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
-    GetStatic   f      -> kw "getstatic"   <+> ppSField  f
-    SetStatic   f x    -> kw "setstatic"   <+> ppSField  f <+> op "<-" <+> ppAtom x
+    Copy              xs -> ppAtoms xs
+    Invoke          f xs -> ppAtom f <+> ppAtoms xs
+    InvokeUnary   o x    -> ppUnaryOp o <> ppAtom x
+    InvokeBinary  o x y  -> ppAtom x <+> ppBinaryOp o <+> ppAtom y
+    InvokeStatic  m   xs -> kw "invokestatic"  <+> ppSMethod m <+> ppAtoms xs
+    InvokeVirtual m i xs -> kw "invokevirtual" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
+    InvokeSpecial m i xs -> kw "invokespecial" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
+    GetField      f i    -> kw "getfield"      <+> ppIField  f <+> ppAtom i
+    PutField      f i x  -> kw "putfield"      <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
+    GetStatic     f      -> kw "getstatic"     <+> ppSField  f
+    PutStatic     f x    -> kw "putstatic"     <+> ppSField  f <+> op "<-" <+> ppAtom x
 
 ppBinding :: Pretty n => Binding n -> Doc
 ppBinding binding = case binding of
@@ -88,9 +88,9 @@ ppBinaryOp o = case o of
     _     -> error "ppBinaryOp"
 
 ppFormat :: Format -> Doc
-ppFormat (Fmt N sz) = text "`U" <> integer sz
-ppFormat (Fmt Z sz) = text "`I" <> integer sz
-ppFormat (Fmt R sz) = text "`F" <> integer sz
+ppFormat (Fmt U sz) = text "`U" <> integer sz
+ppFormat (Fmt I sz) = text "`I" <> integer sz
+ppFormat (Fmt F sz) = text "`F" <> integer sz
 
 ------------------------------------------------------------------------
 

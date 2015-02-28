@@ -1,4 +1,3 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternSynonyms #-}
 
@@ -13,13 +12,13 @@ import           Tonic.Types
 
 ------------------------------------------------------------------------
 
-pattern F32 = Fmt R 32
+pattern F32 = Fmt F 32
 
 foo0 :: Term String
 foo0 =
-    Let [x] (CallBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
-    Let [y] (CallStatic float2string [Var x]) $
-    Return (SetStatic defaultString (Var y))
+    Let [x] (InvokeBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
+    Let [y] (InvokeStatic float2string [Var x]) $
+    Return (PutStatic defaultString (Var y))
   where
     (x,y) = ("x","y")
 
@@ -30,8 +29,8 @@ foo1 =
     Let [w] (Copy [Num 42 F32]) $
     letrec [ (u, Const     (Return (Copy [Num 42 F32])))
            , (t, Lambda [] (Return (Copy [Num 1 F32]))) ] $
-    Let [z] (CallBinary (Add F32) (Var x) (Var y)) $
-    Return (CallStatic float2string [Var z])
+    Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
+    Return (InvokeStatic float2string [Var z])
   where
     (x,y,z,w,u,t) = ("x","y","z","w","u","t")
 
@@ -41,12 +40,12 @@ foo2 :: Term String
 foo2 =
     letrec [ (x,     Const        (Return (Copy [Num 9 F32])))
            , (y,     Const        (Return (Copy [Num 1 F32])))
-           , (add,   Lambda [x,y] (Return (CallBinary (Add F32) (Var x) (Var y))))
-           , (toStr, Lambda [n]   (Return (CallStatic float2string [Var n])))
+           , (add,   Lambda [x,y] (Return (InvokeBinary (Add F32) (Var x) (Var y))))
+           , (toStr, Lambda [n]   (Return (InvokeStatic float2string [Var n])))
            , (f,     Lambda [w]   (Return (Copy [Var x])))
            , (g,     Lambda []    (Return (Copy [Var y]))) ] $
-    Let [z] (Call (Var add) [Var x, Var y]) $
-    Return (Call (Var toStr) [Var z])
+    Let [z] (Invoke (Var add) [Var x, Var y]) $
+    Return (Invoke (Var toStr) [Var z])
   where
     (x,y,z,w,f,g,n,add,toStr) = ("x","y","z","w","f","g","n","add","toStr")
 
@@ -72,17 +71,17 @@ fvOfAtoms = S.unions . map fvOfAtom
 
 fvOfTail :: Ord n => Tail n -> Set n
 fvOfTail tl = case tl of
-    Copy xs            -> fvOfAtoms xs
-    Call f xs          -> fvOfAtom f `S.union` fvOfAtoms xs
-    CallUnary   _ x    -> fvOfAtom x
-    CallBinary  _ x y  -> fvOfAtom x `S.union` fvOfAtom y
-    CallVirtual _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
-    CallSpecial _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
-    CallStatic  _   xs -> fvOfAtoms xs
-    GetField    _ i    -> fvOfAtom i
-    SetField    _ i x  -> fvOfAtom i `S.union` fvOfAtom x
-    GetStatic   _      -> S.empty
-    SetStatic   _   x  -> fvOfAtom x
+    Copy              xs -> fvOfAtoms xs
+    Invoke          f xs -> fvOfAtom f `S.union` fvOfAtoms xs
+    InvokeUnary   _ x    -> fvOfAtom x
+    InvokeBinary  _ x y  -> fvOfAtom x `S.union` fvOfAtom y
+    InvokeVirtual _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
+    InvokeSpecial _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
+    InvokeStatic  _   xs -> fvOfAtoms xs
+    GetField      _ i    -> fvOfAtom i
+    PutField      _ i x  -> fvOfAtom i `S.union` fvOfAtom x
+    GetStatic     _      -> S.empty
+    PutStatic     _   x  -> fvOfAtom x
 
 fvOfBinding :: Ord n => Binding n -> Set n
 fvOfBinding binding = case binding of
@@ -116,30 +115,30 @@ renameAtoms names = map (renameAtom names)
 
 renameTail :: (Ord a, Show a, Show b) => Map a b -> Tail a -> Tail b
 renameTail names tl = case tl of
-    Copy xs            -> Copy (renameAtoms names xs)
-    Call f xs          -> Call (renameAtom names f) (renameAtoms names xs)
-    CallUnary   o x    -> CallUnary   o (renameAtom names x)
-    CallBinary  o x y  -> CallBinary  o (renameAtom names x) (renameAtom names y)
-    CallVirtual m i xs -> CallVirtual m (renameAtom names i) (renameAtoms names xs)
-    CallSpecial m i xs -> CallSpecial m (renameAtom names i) (renameAtoms names xs)
-    CallStatic  m   xs -> CallStatic  m                      (renameAtoms names xs)
-    GetField    f i    -> GetField    f (renameAtom names i)
-    SetField    f i x  -> SetField    f (renameAtom names i) (renameAtom names x)
-    GetStatic   f      -> GetStatic   f
-    SetStatic   f   x  -> SetStatic   f (renameAtom names x)
+    Copy              xs -> Copy                                 (renameAtoms names xs)
+    Invoke          f xs -> Invoke          (renameAtom names f) (renameAtoms names xs)
+    InvokeUnary   o x    -> InvokeUnary   o (renameAtom names x)
+    InvokeBinary  o x y  -> InvokeBinary  o (renameAtom names x) (renameAtom names y)
+    InvokeVirtual m i xs -> InvokeVirtual m (renameAtom names i) (renameAtoms names xs)
+    InvokeSpecial m i xs -> InvokeSpecial m (renameAtom names i) (renameAtoms names xs)
+    InvokeStatic  m   xs -> InvokeStatic  m                      (renameAtoms names xs)
+    GetField      f i    -> GetField      f (renameAtom names i)
+    PutField      f i x  -> PutField      f (renameAtom names i) (renameAtom names x)
+    GetStatic     f      -> GetStatic     f
+    PutStatic     f   x  -> PutStatic     f (renameAtom names x)
 
 renameBindings :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Bindings a -> ([b], Map a b, Bindings b)
 renameBindings gen names as = (gen2, names', bs)
   where
     gen1       = drop (M.size as) gen
-    names'     = names // M.fromList (M.keys as `zip` gen)
+    names'     = names `mapUnionR` M.fromList (M.keys as `zip` gen)
     (gen2, bs) = renameBindingsList gen1 names' (M.toList as)
 
 renameBindingsList :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> [(a, Binding a)] -> ([b], Bindings b)
 renameBindingsList gen names bindings = case bindings of
 
     [(k, Lambda ns x)] -> let (ns', gen1) = splitAt (length ns) gen
-                              names'      = names // M.fromList (ns `zip` gen)
+                              names'      = names `mapUnionR` M.fromList (ns `zip` gen)
                               (gen2, x')  = renameTerm gen1 names' x
                               k'          = unsafeLookup "renameBindingsList" k names
                           in
@@ -168,7 +167,7 @@ renameTerm gen names term = case term of
                        (gen2, Iff (renameAtom names i) t' e')
 
     Let ns x y  -> let (ns', gen1) = splitAt (length ns) gen
-                       names'      = names // M.fromList (ns `zip` gen)
+                       names'      = names `mapUnionR` M.fromList (ns `zip` gen)
                        (gen2, y')  = renameTerm gen1 names' y
                    in
                        (gen2, Let ns' (renameTail names x) y')
@@ -191,17 +190,17 @@ substAtoms subs = map (substAtom subs)
 
 substTail :: Ord n => Map n (Atom n) -> Tail n -> Tail n
 substTail subs tl = case tl of
-    Copy xs            -> Copy (substAtoms subs xs)
-    Call f xs          -> Call (substAtom subs f) (substAtoms subs xs)
-    CallUnary   o x    -> CallUnary   o (substAtom subs x)
-    CallBinary  o x y  -> CallBinary  o (substAtom subs x) (substAtom subs y)
-    CallVirtual m i xs -> CallVirtual m (substAtom subs i) (substAtoms subs xs)
-    CallSpecial m i xs -> CallSpecial m (substAtom subs i) (substAtoms subs xs)
-    CallStatic  m   xs -> CallStatic  m                    (substAtoms subs xs)
-    GetField    f i    -> GetField    f (substAtom subs i)
-    SetField    f i x  -> SetField    f (substAtom subs i) (substAtom subs x)
-    GetStatic   f      -> GetStatic   f
-    SetStatic   f   x  -> SetStatic   f (substAtom subs x)
+    Copy              xs -> Copy                               (substAtoms subs xs)
+    Invoke          f xs -> Invoke          (substAtom subs f) (substAtoms subs xs)
+    InvokeUnary   o x    -> InvokeUnary   o (substAtom subs x)
+    InvokeBinary  o x y  -> InvokeBinary  o (substAtom subs x) (substAtom subs y)
+    InvokeVirtual m i xs -> InvokeVirtual m (substAtom subs i) (substAtoms subs xs)
+    InvokeSpecial m i xs -> InvokeSpecial m (substAtom subs i) (substAtoms subs xs)
+    InvokeStatic  m   xs -> InvokeStatic  m                    (substAtoms subs xs)
+    GetField      f i    -> GetField      f (substAtom subs i)
+    PutField      f i x  -> PutField      f (substAtom subs i) (substAtom subs x)
+    GetStatic     f      -> GetStatic     f
+    PutStatic     f   x  -> PutStatic     f (substAtom subs x)
 
 substBinding :: Ord n => Map n (Atom n) -> Binding n -> Binding n
 substBinding subs binding = case binding of
@@ -279,7 +278,7 @@ inlineBinding env binding = case binding of
 
 inlineTerm :: (Ord n, Show n) => Bindings n -> Term n -> Term n
 inlineTerm env term = case term of
-    Return (Call (Var f) xs) ->
+    Return (Invoke (Var f) xs) ->
       case unsafeLookup "inlineTerm" f env of
         Lambda ns tm -> inlineTerm env $ substTerm (M.fromList (ns `zip` xs)) tm
         _            -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
@@ -287,7 +286,7 @@ inlineTerm env term = case term of
     Return x  -> Return x
     Iff i t e -> Iff i (inlineTerm env t) (inlineTerm env e)
 
-    Let ns (Call (Var f) xs) y ->
+    Let ns (Invoke (Var f) xs) y ->
       case unsafeLookup "inlineTerm" f env of
         Lambda ns' tm -> inlineTerm env $ letTerm ns (substTerm (M.fromList (ns' `zip` xs)) tm) y
         _             -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
@@ -296,7 +295,7 @@ inlineTerm env term = case term of
 
     -- XXX check this knot tying is ok
     LetRec bs x -> let bs'  = M.map (inlineBinding env') bs
-                       env' = env // bs'
+                       env' = env `mapUnionR` bs'
                        x'   = inlineTerm env' x
                    in
                        LetRec bs' x'
@@ -326,10 +325,10 @@ mapDifferenceS m s = M.difference m (M.fromSet (const ()) s)
 mapIntersectionS :: Ord k => Map k v -> Set k -> Map k v
 mapIntersectionS m s = M.intersection m (M.fromSet (const ()) s)
 
+mapUnionR :: Ord k => Map k v -> Map k v -> Map k v
+mapUnionR = M.unionWith (\_ x -> x)
+
 unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
 unsafeLookup msg k kvs = M.findWithDefault (error msg') k kvs
   where
     msg' = msg ++ ": name not found: " ++ show k ++ " in " ++ show (M.toList kvs)
-
-(//) :: Ord k => Map k v -> Map k v -> Map k v
-(//) = M.unionWith (\_ x -> x)

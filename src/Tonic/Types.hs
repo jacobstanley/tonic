@@ -14,17 +14,17 @@ data Atom n =
 data Tail n =
       Copy [Atom n]
 
-    | Call        (Atom n) [Atom n]
-    | CallUnary   UnaryOp  (Atom n)
-    | CallBinary  BinaryOp (Atom n) (Atom n)
-    | CallVirtual IMethod  (Atom n) [Atom n]
-    | CallSpecial IMethod  (Atom n) [Atom n]
-    | CallStatic  SMethod  [Atom n]
+    | Invoke        (Atom n) [Atom n]
+    | InvokeUnary   UnaryOp  (Atom n)
+    | InvokeBinary  BinaryOp (Atom n) (Atom n)
+    | InvokeVirtual IMethod  (Atom n) [Atom n]
+    | InvokeSpecial IMethod  (Atom n) [Atom n]
+    | InvokeStatic  SMethod  [Atom n]
 
     | GetField  IField (Atom n)
-    | SetField  IField (Atom n) (Atom n)
+    | PutField  IField (Atom n) (Atom n)
     | GetStatic SField
-    | SetStatic SField (Atom n)
+    | PutStatic SField (Atom n)
     deriving (Eq, Ord, Show)
 
 type Bindings n = Map n (Binding n)
@@ -78,9 +78,9 @@ data Format = Fmt Genre Size
     deriving (Eq, Ord, Show)
 
 data Genre =
-      N -- ^ natural numbers
-    | Z -- ^ integers
-    | R -- ^ rationals
+      U -- ^ unsigned integers
+    | I -- ^ signed integers
+    | F -- ^ floating point
     deriving (Eq, Ord, Enum, Show)
 
 type Size = Integer
