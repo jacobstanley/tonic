@@ -5,8 +5,6 @@ module Tonic where
 
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Maybe (maybeToList)
-import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
 
@@ -14,7 +12,9 @@ import           Tonic.Types
 
 ------------------------------------------------------------------------
 
-pattern F32 = Fmt F 32
+pattern F32     = Fmt F 32
+pattern NF32    = NumTy (Fmt F 32)
+pattern JString = ObjTy "java/lang/String"
 
 foo0 :: Term String
 foo0 =
@@ -29,8 +29,8 @@ foo1 =
     Let [x] (Copy [Num 9 F32]) $
     Let [y] (Copy [Num 1 F32]) $
     Let [w] (Copy [Num 42 F32]) $
-    letrec [ (u, Const     (Return (Copy [Num 42 F32])))
-           , (t, Lambda [] (Return (Copy [Num 1 F32]))) ] $
+    letrec [ (u, Const  NF32                   (Return (Copy [Num 42 F32])))
+           , (t, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 1 F32]))) ] $
     Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
     Return (InvokeStatic float2string [Var z])
   where
@@ -40,22 +40,27 @@ foo1 =
 
 foo2 :: Term String
 foo2 =
-    letrec [ (x,     Const        (Return (Copy [Num 9 F32])))
-           , (y,     Const        (Return (Copy [Num 1 F32])))
-           , (add,   Lambda [x,y] (Return (InvokeBinary (Add F32) (Var x) (Var y))))
-           , (toStr, Lambda [n]   (Return (InvokeStatic float2string [Var n])))
-           , (f,     Lambda [w]   (Return (Copy [Var x])))
-           , (g,     Lambda []    (Return (Copy [Var y]))) ] $
-    Let [z] (Invoke (Var add) [Var x, Var y]) $
-    Return (Invoke (Var toStr) [Var z])
+    letrec [ (toStr, Lambda f2s  [n]   (Return (InvokeStatic float2string [Var n])))
+           , (x,     Const  NF32       (Return (Copy [Num 9 F32])))
+           , (y,     Const  NF32       (Return (Copy [Num 1 F32])))
+           , (add,   Lambda ff2f [x,y] (Return (InvokeBinary (Add F32) (Var x) (Var y))))
+           , (f,     Lambda f2f  [w]   (Return (Copy [Var x])))
+           , (g,     Lambda _2f  []    (Return (Copy [Var y]))) ] $
+    Let [z] (Invoke ff2f (Var add) [Var x, Var y]) $
+    Return (Invoke f2s (Var toStr) [Var z])
   where
     (x,y,z,w,f,g,n,add,toStr) = ("x","y","z","w","f","g","n","add","toStr")
+
+    ff2f = FunType [NF32, NF32] [NF32]
+    f2f  = FunType [NF32]       [NF32]
+    _2f  = FunType []           [NF32]
+    f2s  = FunType [NF32]       [JString]
 
     letrec bs t = LetRec (M.fromList bs) t
 
 float2string :: SMethod
 float2string = SMethod "java/lang/Float" "toString"
-    (MethodType [NumTy (Fmt F 32)] (Just (ObjTy "java/lang/String")))
+    (MethodType [NF32] (Just JString))
 
 defaultString :: SField
 defaultString = SField "java/lang/String" "default" (ObjTy "java/lang/String")
@@ -75,7 +80,7 @@ fvOfAtoms = S.unions . map fvOfAtom
 fvOfTail :: Ord n => Tail n -> Set n
 fvOfTail tl = case tl of
     Copy              xs -> fvOfAtoms xs
-    Invoke          f xs -> fvOfAtom f `S.union` fvOfAtoms xs
+    Invoke        _ f xs -> fvOfAtom f `S.union` fvOfAtoms xs
     InvokeUnary   _ x    -> fvOfAtom x
     InvokeBinary  _ x y  -> fvOfAtom x `S.union` fvOfAtom y
     InvokeVirtual _ i xs -> fvOfAtom i `S.union` fvOfAtoms xs
@@ -88,8 +93,8 @@ fvOfTail tl = case tl of
 
 fvOfBinding :: Ord n => Binding n -> Set n
 fvOfBinding binding = case binding of
-    Lambda ns x -> fvOfTerm x `setDifferenceL` ns
-    Const     x -> fvOfTerm x
+    Lambda _ ns x -> fvOfTerm x `setDifferenceL` ns
+    Const  _    x -> fvOfTerm x
 
 fvOfBindings :: Ord n => Bindings n -> Set n
 fvOfBindings = S.unions . map fvOfBinding . M.elems
@@ -109,9 +114,9 @@ fvOfTerm term = case term of
 
 renameAtom :: (Ord a, Show a, Show b) => Map a b -> Atom a -> Atom b
 renameAtom names atom = case atom of
-    Var x   -> Var (unsafeLookup "renameAtom" x names)
-    Num x f -> Num x f
-    Str x   -> Str x
+    Var x     -> Var (unsafeLookup "renameAtom" x names)
+    Num x fmt -> Num x fmt
+    Str x     -> Str x
 
 renameAtoms :: (Ord a, Show a, Show b) => Map a b -> [Atom a] -> [Atom b]
 renameAtoms names = map (renameAtom names)
@@ -119,7 +124,7 @@ renameAtoms names = map (renameAtom names)
 renameTail :: (Ord a, Show a, Show b) => Map a b -> Tail a -> Tail b
 renameTail names tl = case tl of
     Copy              xs -> Copy                                 (renameAtoms names xs)
-    Invoke          f xs -> Invoke          (renameAtom names f) (renameAtoms names xs)
+    Invoke        t f xs -> Invoke        t (renameAtom names f) (renameAtoms names xs)
     InvokeUnary   o x    -> InvokeUnary   o (renameAtom names x)
     InvokeBinary  o x y  -> InvokeBinary  o (renameAtom names x) (renameAtom names y)
     InvokeVirtual m i xs -> InvokeVirtual m (renameAtom names i) (renameAtoms names xs)
@@ -140,17 +145,17 @@ renameBindings gen names as = (gen2, names', bs)
 renameBindingsList :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> [(a, Binding a)] -> ([b], Bindings b)
 renameBindingsList gen names bindings = case bindings of
 
-    [(k, Lambda ns x)] -> let (ns', gen1) = splitAt (length ns) gen
-                              names'      = names `mapUnionR` M.fromList (ns `zip` gen)
-                              (gen2, x')  = renameTerm gen1 names' x
-                              k'          = unsafeLookup "renameBindingsList" k names
-                          in
-                              (gen2, M.singleton k' (Lambda ns' x'))
+    [(k, Lambda t ns x)] -> let (ns', gen1) = splitAt (length ns) gen
+                                names'      = names `mapUnionR` M.fromList (ns `zip` gen)
+                                (gen2, x')  = renameTerm gen1 names' x
+                                k'          = unsafeLookup "renameBindingsList" k names
+                            in
+                                (gen2, M.singleton k' (Lambda t ns' x'))
 
-    [(k, Const x)]     -> let (gen', x') = renameTerm gen names x
-                              k'         = unsafeLookup "renameBindingsList" k names
-                          in
-                              (gen', M.singleton k' (Const x'))
+    [(k, Const t x)]     -> let (gen', x') = renameTerm gen names x
+                                k'         = unsafeLookup "renameBindingsList" k names
+                            in
+                                (gen', M.singleton k' (Const t x'))
 
     []     -> (gen, M.empty)
 
@@ -194,7 +199,7 @@ substAtoms subs = map (substAtom subs)
 substTail :: Ord n => Map n (Atom n) -> Tail n -> Tail n
 substTail subs tl = case tl of
     Copy              xs -> Copy                               (substAtoms subs xs)
-    Invoke          f xs -> Invoke          (substAtom subs f) (substAtoms subs xs)
+    Invoke        t f xs -> Invoke        t (substAtom subs f) (substAtoms subs xs)
     InvokeUnary   o x    -> InvokeUnary   o (substAtom subs x)
     InvokeBinary  o x y  -> InvokeBinary  o (substAtom subs x) (substAtom subs y)
     InvokeVirtual m i xs -> InvokeVirtual m (substAtom subs i) (substAtoms subs xs)
@@ -207,8 +212,8 @@ substTail subs tl = case tl of
 
 substBinding :: Ord n => Map n (Atom n) -> Binding n -> Binding n
 substBinding subs binding = case binding of
-    Lambda ns x -> Lambda ns (substTerm (subs `mapDifferenceL` ns) x)
-    Const     x -> Const     (substTerm subs x)
+    Lambda t ns x -> Lambda t ns (substTerm (subs `mapDifferenceL` ns) x)
+    Const  t    x -> Const  t    (substTerm subs x)
 
 substTerm :: Ord n => Map n (Atom n) -> Term n -> Term n
 substTerm subs term = case term of
@@ -223,8 +228,8 @@ substTerm subs term = case term of
 
 simplifyBinding :: Ord n => Binding n -> Binding n
 simplifyBinding binding = case binding of
-    Lambda ns x -> Lambda ns (simplifyTerm x)
-    Const     x -> Const     (simplifyTerm x)
+    Lambda t ns x -> Lambda t ns (simplifyTerm x)
+    Const  t    x -> Const  t    (simplifyTerm x)
 
 simplifyTerm :: Ord n => Term n -> Term n
 simplifyTerm term = case term of
@@ -241,8 +246,8 @@ simplifyTerm term = case term of
 
 deadBinding :: Ord n => Binding n -> Binding n
 deadBinding binding = case binding of
-    Lambda ns x -> Lambda ns (deadTerm x)
-    Const     x -> Const     (deadTerm x)
+    Lambda t ns x -> Lambda t ns (deadTerm x)
+    Const  t    x -> Const  t    (deadTerm x)
 
 deadTerm :: Ord n => Term n -> Term n
 deadTerm term = case term of
@@ -276,23 +281,23 @@ findRequired vs bs | vs == vs' = bs'
 
 inlineBinding :: (Ord n, Show n) => Bindings n -> Binding n -> Binding n
 inlineBinding env binding = case binding of
-    Lambda ns x -> Lambda ns (inlineTerm (env `mapDifferenceL` ns) x)
-    Const     x -> Const     (inlineTerm env x)
+    Lambda t ns x -> Lambda t ns (inlineTerm (env `mapDifferenceL` ns) x)
+    Const  t    x -> Const  t    (inlineTerm env x)
 
 inlineTerm :: (Ord n, Show n) => Bindings n -> Term n -> Term n
 inlineTerm env term = case term of
-    Return (Invoke (Var f) xs) ->
+    Return (Invoke _ (Var f) xs) ->
       case unsafeLookup "inlineTerm" f env of
-        Lambda ns tm -> inlineTerm env $ substTerm (M.fromList (ns `zip` xs)) tm
-        _            -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
+        Lambda _ ns tm -> inlineTerm env $ substTerm (M.fromList (ns `zip` xs)) tm
+        _              -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
 
     Return x  -> Return x
     Iff i t e -> Iff i (inlineTerm env t) (inlineTerm env e)
 
-    Let ns (Invoke (Var f) xs) y ->
+    Let ns (Invoke _ (Var f) xs) y ->
       case unsafeLookup "inlineTerm" f env of
-        Lambda ns' tm -> inlineTerm env $ letTerm ns (substTerm (M.fromList (ns' `zip` xs)) tm) y
-        _             -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
+        Lambda _ ns' tm -> inlineTerm env $ letTerm ns (substTerm (M.fromList (ns' `zip` xs)) tm) y
+        _               -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
 
     Let ns x y  -> Let ns x (inlineTerm env y)
 
@@ -310,120 +315,3 @@ letTerm ns term cont = case term of
     Let ns' x y -> Let ns' x (letTerm ns y cont)
     LetRec bs x -> LetRec bs (letTerm ns x cont)
 
-------------------------------------------------------------------------
-
-{-
-type TypeMap n = Map n (Maybe VarType)
-
-typeOfAtom :: (Ord n, Show n) => TypeMap n -> Atom n -> VarType
-typeOfAtom env atom = case atom of
-    Var x   -> unsafeLookup "typeOfAtom" x env
-    Num _ f -> NumTy f
-    Str _   -> ObjTy "java/lang/String"
-
-typesOfTail :: (Ord n, Show n) => TypeMap n -> Tail n -> (TypeMap n, [VarType])
-typesOfTail env tl = case tl of
-    Copy              xs -> map (typeOfAtom env) xs
-    Invoke          f _  -> resultTypeOfFun f
-    InvokeUnary   o _    -> [NumTy (resultFormatOfUnary o)]
-    InvokeBinary  o _ _  -> [NumTy (resultFormatOfBinary o)]
-    InvokeVirtual m _ _  -> maybeToList (resultTypeOfIMethod m)
-    InvokeSpecial m _ _  -> maybeToList (resultTypeOfIMethod m)
-    InvokeStatic  m   _  -> maybeToList (resultTypeOfSMethod m)
-    GetField      f _    -> [typeOfIField f]
-    PutField      _ _ _  -> []
-    GetStatic     f      -> [typeOfSField f]
-    PutStatic     _   _  -> []
-  where
-    resultTypeOfFun x = case typeOfAtom env x of
-        FunTy _ os -> os
-        ty         -> error $ "typesOfTail: expected " <> show x
-                           <> " to be a function, but was: " <> show ty
-
-typeOfBinding :: (Ord n, Show n) => Map n VarType -> Binding n -> VarType
-typeOfBinding env binding = case binding of
-    Lambda _ x -> FunTy [] (typesOfTerm env x)
-    Const    x -> case typesOfTerm env x of
-        [t] -> t
-        ts  -> error $ "typeOfBinding: expected singleton result type "
-                    <> "for constant expression, but was: " <> show ts
-
-typesOfTerm :: (Ord n, Show n) => Map n VarType -> Term n -> [VarType]
-typesOfTerm env term = case term of
-    Return tl  -> typesOfTail env tl
-    Iff _ t _  -> typesOfTerm env t
-
-    Let ns x y -> let env' = env `mapUnionR` M.fromList (ns `zip` typesOfTail env x)
-                  in typesOfTerm env' y
-
-    LetRec bs x -> let env' = env `mapUnionR` M.map (typeOfBinding env') bs
-                   in typesOfTerm env' x
-
--}
-
-------------------------------------------------------------------------
--- Formats/Types
-
-resultFormatOfUnary :: UnaryOp -> Format
-resultFormatOfUnary op = case op of
-    Neg x   -> x
-    Not x   -> x
-    Cnv _ x -> x
-
-resultFormatOfBinary :: BinaryOp -> Format
-resultFormatOfBinary op = case op of
-    Add x -> x
-    Sub x -> x
-    Mul x -> x
-    Div x -> x
-    Rem x -> x
-    Sla x -> x
-    Sra x -> x
-    Sru x -> x
-    And x -> x
-    Ior x -> x
-    Xor x -> x
-    Ceq x -> x
-    Cne x -> x
-    Clt x -> x
-    Cgt x -> x
-    Cle x -> x
-    Cge x -> x
-
-resultTypeOfIMethod :: IMethod -> Maybe VarType
-resultTypeOfIMethod (IMethod _ _ (MethodType _ t)) = t
-
-resultTypeOfSMethod :: SMethod -> Maybe VarType
-resultTypeOfSMethod (SMethod _ _ (MethodType _ t)) = t
-
-typeOfIField :: IField -> VarType
-typeOfIField (IField _ _ t) = t
-
-typeOfSField :: SField -> VarType
-typeOfSField (SField _ _ t) = t
-
-------------------------------------------------------------------------
--- Utils
-
-setDifferenceL :: Ord a => Set a -> [a] -> Set a
-setDifferenceL s xs = S.difference s (S.fromList xs)
-
-setIntersectionL :: Ord a => Set a -> [a] -> Set a
-setIntersectionL s xs = S.intersection s (S.fromList xs)
-
-mapDifferenceL :: Ord k => Map k v -> [k] -> Map k v
-mapDifferenceL m xs = M.difference m (M.fromList (map (\x -> (x, ())) xs))
-
-mapDifferenceS :: Ord k => Map k v -> Set k -> Map k v
-mapDifferenceS m s = M.difference m (M.fromSet (const ()) s)
-
-mapIntersectionS :: Ord k => Map k v -> Set k -> Map k v
-mapIntersectionS m s = M.intersection m (M.fromSet (const ()) s)
-
-mapUnionR :: Ord k => Map k v -> Map k v -> Map k v
-mapUnionR = M.unionWith (\_ x -> x)
-
-unsafeLookup :: (Ord k, Show k, Show v) => String -> k -> Map k v -> v
-unsafeLookup msg k kvs = M.findWithDefault (error msg') k kvs
-  where
-    msg' = msg ++ ": name not found: " ++ show k ++ " in " ++ show (M.toList kvs)

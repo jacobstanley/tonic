@@ -197,6 +197,31 @@ data Instruction =
     | FAdd
     | DAdd
 
+    | ISub
+    | LSub
+    | FSub
+    | DSub
+
+    | IMul
+    | LMul
+    | FMul
+    | DMul
+
+    | IDiv
+    | LDiv
+    | FDiv
+    | DDiv
+
+    | IRem
+    | LRem
+    | FRem
+    | DRem
+
+    | INeg
+    | LNeg
+    | FNeg
+    | DNeg
+
     | IReturn
     | LReturn
     | FReturn
@@ -416,7 +441,7 @@ bMethod Method{..} = do
 bAttributes :: [(Text, Maybe (CP Builder))] -> CP Builder
 bAttributes as = do
     bs <- mapM (uncurry bAttribute) as'
-    return $ word16BE (fromIntegral (length as))
+    return $ word16BE (fromIntegral (length as'))
           <> mconcat bs
   where
     as' = mapMaybe go as
@@ -617,6 +642,31 @@ bytecodeOfInstruction i = case i of
     LAdd -> pure B'LAdd
     FAdd -> pure B'FAdd
     DAdd -> pure B'DAdd
+
+    ISub -> pure B'ISub
+    LSub -> pure B'LSub
+    FSub -> pure B'FSub
+    DSub -> pure B'DSub
+
+    IMul -> pure B'IMul
+    LMul -> pure B'LMul
+    FMul -> pure B'FMul
+    DMul -> pure B'DMul
+
+    IDiv -> pure B'IDiv
+    LDiv -> pure B'LDiv
+    FDiv -> pure B'FDiv
+    DDiv -> pure B'DDiv
+
+    IRem -> pure B'IRem
+    LRem -> pure B'LRem
+    FRem -> pure B'FRem
+    DRem -> pure B'DRem
+
+    INeg -> pure B'INeg
+    LNeg -> pure B'LNeg
+    FNeg -> pure B'FNeg
+    DNeg -> pure B'DNeg
 
     -- Misc --
 

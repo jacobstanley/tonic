@@ -38,7 +38,7 @@ ppNames = tuple . map letName
 ppTail :: Pretty n => Tail n -> Doc
 ppTail tl = case tl of
     Copy              xs -> ppAtoms xs
-    Invoke          f xs -> ppAtom f <+> ppAtoms xs
+    Invoke        _ f xs -> ppAtom f <+> ppAtoms xs
     InvokeUnary   o x    -> ppUnaryOp o <> ppAtom x
     InvokeBinary  o x y  -> ppAtom x <+> ppBinaryOp o <+> ppAtom y
     InvokeStatic  m   xs -> kw "invokestatic"  <+> ppSMethod m <+> ppAtoms xs
@@ -51,8 +51,8 @@ ppTail tl = case tl of
 
 ppBinding :: Pretty n => Binding n -> Doc
 ppBinding binding = case binding of
-    Lambda ns x -> op "\\" <> ppNames ns <+> op "->" <+> ppTerm x
-    Const     x -> ppTerm x
+    Lambda _ ns x -> op "\\" <> ppNames ns <+> op "->" <+> ppTerm x
+    Const  _    x -> ppTerm x
 
 ppBindings :: Pretty n => Map n (Binding n) -> Doc
 ppBindings bs | M.null bs = tuple []

@@ -15,7 +15,7 @@ import           Data.Int (Int8, Int16, Int32, Int64)
 import           Data.List (foldl1')
 import           Data.Map.Lazy (Map)
 import qualified Data.Map.Lazy as M
-import           Data.Maybe (mapMaybe)
+import           Data.Maybe (mapMaybe, fromJust)
 import           Data.Monoid ((<>), mconcat)
 import           Data.Text (Text)
 import qualified Data.Text.Encoding as T
@@ -43,8 +43,11 @@ main = do
     print (deadTerm foo1)
     print (rename $ deadTerm foo1)
 
-    withFile "Jvmc.class" WriteMode $ \h ->
-        hPutBuilder h $ bClass $ jvmc -- (Code 8 8 xs)
+    (LetRec bs _) <- return foo2
+    withFile "Jvmc.class" WriteMode $ \h -> do
+        let cls = closureOfBinding "toStr" (fromJust (M.lookup "toStr" bs))
+        print cls
+        hPutBuilder h $ bClass cls
 
 ------------------------------------------------------------------------
 

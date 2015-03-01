@@ -14,7 +14,7 @@ data Atom n =
 data Tail n =
       Copy [Atom n]
 
-    | Invoke        (Atom n) [Atom n]
+    | Invoke        FunType  (Atom n) [Atom n]
     | InvokeUnary   UnaryOp  (Atom n)
     | InvokeBinary  BinaryOp (Atom n) (Atom n)
     | InvokeVirtual IMethod  (Atom n) [Atom n]
@@ -30,8 +30,8 @@ data Tail n =
 type Bindings n = Map n (Binding n)
 
 data Binding n =
-      Lambda [n] (Term n)
-    | Const      (Term n)
+      Lambda FunType [n] (Term n)
+    | Const  Type        (Term n)
     deriving (Eq, Ord, Show)
 
 data Term n =
@@ -74,30 +74,36 @@ data BinaryOp =
 
 ------------------------------------------------------------------------
 
+-- | Describes the representation of a number.
 data Format = Fmt Genre Size
     deriving (Eq, Ord, Show)
 
+-- | The encoding used to represent a number.
 data Genre =
       U -- ^ unsigned integers
     | I -- ^ signed integers
     | F -- ^ floating point
+    | A -- ^ objects (can only be null)
     deriving (Eq, Ord, Enum, Show)
 
+-- | Number of bits to use to represent a number.
 type Size = Integer
 
-------------------------------------------------------------------------
-
--- | Variable types - the type of anything assignable to a variable.
-data VarType =
-      FunTy [VarType] [VarType]
+-- | Value types - the type of anything assignable to a variable.
+data Type =
+      FunTy FunType
     | NumTy Format
     | ObjTy Text
-    | ArrTy VarType
+    | ArrTy Type
+    deriving (Eq, Ord, Show)
+
+-- | Function types.
+data FunType = FunType [Type] [Type]
     deriving (Eq, Ord, Show)
 
 -- | Method types - methods are functions that cannot be assigned to
 -- variables and can only have one or zero returns values.
-data MethodType = MethodType [VarType] (Maybe VarType)
+data MethodType = MethodType [Type] (Maybe Type)
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
@@ -115,9 +121,9 @@ data SMethod = SMethod ClassName MethodName MethodType
     deriving (Eq, Ord, Show)
 
 -- | Instance field.
-data IField = IField ClassName FieldName VarType
+data IField = IField ClassName FieldName Type
     deriving (Eq, Ord, Show)
 
 -- | Static field.
-data SField = SField ClassName FieldName VarType
+data SField = SField ClassName FieldName Type
     deriving (Eq, Ord, Show)
