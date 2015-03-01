@@ -52,10 +52,11 @@ foo2 =
     letrec bs t = LetRec (M.fromList bs) t
 
 float2string :: SMethod
-float2string = SMethod "java/lang/Float" "toString" [Float] (Just (Object "java/lang/String"))
+float2string = SMethod "java/lang/Float" "toString"
+    (MethodType [NumTy (Fmt F 32)] (Just (ObjTy "java/lang/String")))
 
 defaultString :: SField
-defaultString = SField "java/lang/String" "default" (Object "java/lang/String")
+defaultString = SField "java/lang/String" "default" (ObjTy "java/lang/String")
 
 ------------------------------------------------------------------------
 -- Finding Free Variables

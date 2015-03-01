@@ -87,35 +87,37 @@ type Size = Integer
 
 ------------------------------------------------------------------------
 
--- | JVM types.
-data JType =
-      Boolean
-    | Byte
-    | Char
-    | Short
-    | Int
-    | Long
-    | Float
-    | Double
-    | Object Text
+-- | Variable types - the type of anything assignable to a variable.
+data VarType =
+      FunTy [VarType] [VarType]
+    | NumTy Format
+    | ObjTy Text
+    | ArrTy VarType
     deriving (Eq, Ord, Show)
+
+-- | Method types - methods are functions that cannot be assigned to
+-- variables and can only have one or zero returns values.
+data MethodType = MethodType [VarType] (Maybe VarType)
+    deriving (Eq, Ord, Show)
+
+------------------------------------------------------------------------
 
 type ClassName  = Text
 type MethodName = Text
 type FieldName  = Text
 
 -- | Instance method.
-data IMethod = IMethod ClassName MethodName [JType] (Maybe JType)
+data IMethod = IMethod ClassName MethodName MethodType
     deriving (Eq, Ord, Show)
 
 -- | Static method.
-data SMethod = SMethod ClassName MethodName [JType] (Maybe JType)
+data SMethod = SMethod ClassName MethodName MethodType
     deriving (Eq, Ord, Show)
 
 -- | Instance field.
-data IField = IField ClassName FieldName JType
+data IField = IField ClassName FieldName VarType
     deriving (Eq, Ord, Show)
 
 -- | Static field.
-data SField = SField ClassName FieldName JType
+data SField = SField ClassName FieldName VarType
     deriving (Eq, Ord, Show)

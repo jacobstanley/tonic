@@ -95,10 +95,10 @@ ppFormat (Fmt F sz) = text "`F" <> integer sz
 ------------------------------------------------------------------------
 
 ppSMethod :: SMethod -> Doc
-ppSMethod (SMethod cls mth _ _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
+ppSMethod (SMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
 
 ppIMethod :: IMethod -> Doc
-ppIMethod (IMethod cls mth _ _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
+ppIMethod (IMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
 
 ppSField :: SField -> Doc
 ppSField (SField cls fld _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack fld)

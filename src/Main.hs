@@ -26,6 +26,7 @@ import qualified JVM.Codegen as G
 import           JVM.Codegen hiding (Instruction(..))
 import           Tonic (foo0, foo1, foo2)
 import           Tonic (fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm, inlineTerm)
+import           Tonic.Codegen
 import           Tonic.Pretty
 import           Tonic.Types
 
@@ -48,10 +49,13 @@ main = do
 ------------------------------------------------------------------------
 
 newtype Var = V Int
-    deriving (Eq, Ord, Enum, Show, Read)
+    deriving (Eq, Ord, Enum)
 
 instance PP.Pretty Var where
     pretty (V x) = PP.text "x" PP.<> PP.int x
+
+instance Show Var where
+    show (V x) = "x" <> show x
 
 rename :: (Ord n, Show n) => Term n -> Term Var
 rename = snd . renameTerm [V 1..] M.empty
