@@ -197,6 +197,13 @@ data Instruction =
     | FAdd
     | DAdd
 
+    | IReturn
+    | LReturn
+    | FReturn
+    | DReturn
+    | AReturn
+    | Return
+
     | GetStatic FieldRef
     | PutStatic FieldRef
     | GetField  FieldRef
@@ -205,12 +212,7 @@ data Instruction =
     | InvokeVirtual MethodRef
     | InvokeStatic  MethodRef
 
-    | IReturn
-    | LReturn
-    | FReturn
-    | DReturn
-    | AReturn
-    | Return
+    | CheckCast ClassRef
 
     deriving (Eq, Ord, Show, Read)
 ------------------------------------------------------------------------
@@ -623,7 +625,7 @@ bytecodeOfInstruction i = case i of
     FReturn -> pure B'FReturn
     DReturn -> pure B'DReturn
     AReturn -> pure B'AReturn
-    Return -> pure B'Return
+    Return  -> pure B'Return
 
     GetField  x -> B'GetField  . unConstRef <$> addFieldRef x
     PutField  x -> B'PutField  . unConstRef <$> addFieldRef x
@@ -632,6 +634,8 @@ bytecodeOfInstruction i = case i of
 
     InvokeVirtual x -> B'InvokeVirtual . unConstRef <$> addMethodRef x
     InvokeStatic  x -> B'InvokeStatic  . unConstRef <$> addMethodRef x
+
+    CheckCast x -> B'CheckCast . unConstRef <$> addClassRef x
 
   where
     ldc (ConstRef ref) | isWide ref = B'LdC (fromIntegral ref)

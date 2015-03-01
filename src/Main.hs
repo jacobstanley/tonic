@@ -25,7 +25,7 @@ import           System.IO (IOMode(..), withFile)
 import qualified JVM.Codegen as G
 import           JVM.Codegen hiding (Instruction(..))
 import           Tonic (foo0, foo1, foo2)
-import           Tonic (fvOfTerm, renameTerm, substTerm, simplifyTerm, deadTerm, inlineTerm)
+import           Tonic
 import           Tonic.Codegen
 import           Tonic.Pretty
 import           Tonic.Types
@@ -68,7 +68,7 @@ jvmc = Class
     , cName       = ClassRef "Jvmc"
     , cSuper      = ClassRef "java/lang/Object"
     , cInterfaces = []
-    , cFields     = [ Field [F'Static] "foo" (Type "I") ]
+    , cFields     = [ Field [F'Static] "foo" (Type "Ljava/lang/Object;") ]
     , cMethods    = [ Method [M'Public, M'Static] "main" (Type "([Ljava/lang/String;)V") (Just code)
                     --, Method [M'Public, M'Static] "test" (Type "()Ljava/lang/String;") (Just testCode)
                     ]
@@ -76,19 +76,25 @@ jvmc = Class
     }
   where
     code = Code 8 1 [ G.GetStatic sysOut
+                    , G.PutStatic foo
+
+                    , G.GetStatic foo
+                    , G.CheckCast printStream
                     , G.SConst "Hello World!"
                     , G.InvokeVirtual println
 
-                    , G.GetStatic sysOut
-                    , G.InvokeStatic test
+                    , G.GetStatic foo
+                    , G.CheckCast printStream
+                    , G.SConst "Goodbye World!"
                     , G.InvokeVirtual println
 
                     , G.IConst 42
                     , G.InvokeStatic sysExit
                     , G.Return ]
 
+    printStream = ClassRef "java/io/PrintStream"
     sysOut  = FieldRef  (ClassRef "java/lang/System")    (NameType "out"     (Type "Ljava/io/PrintStream;"))
     sysExit = MethodRef (ClassRef "java/lang/System")    (NameType "exit"    (Type "(I)V"))
     println = MethodRef (ClassRef "java/io/PrintStream") (NameType "println" (Type "(Ljava/lang/String;)V"))
 
-    test = MethodRef (ClassRef "Jvmc") (NameType "test" (Type "()Ljava/lang/String;"))
+    foo = FieldRef (ClassRef "Jvmc") (NameType "foo" (Type "Ljava/lang/Object;"))

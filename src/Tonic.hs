@@ -5,6 +5,8 @@ module Tonic where
 
 import           Data.Map (Map)
 import qualified Data.Map as M
+import           Data.Maybe (maybeToList)
+import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
 
@@ -307,6 +309,98 @@ letTerm ns term cont = case term of
     Iff i t e   -> Iff i (letTerm ns t cont) (letTerm ns e cont)
     Let ns' x y -> Let ns' x (letTerm ns y cont)
     LetRec bs x -> LetRec bs (letTerm ns x cont)
+
+------------------------------------------------------------------------
+
+{-
+type TypeMap n = Map n (Maybe VarType)
+
+typeOfAtom :: (Ord n, Show n) => TypeMap n -> Atom n -> VarType
+typeOfAtom env atom = case atom of
+    Var x   -> unsafeLookup "typeOfAtom" x env
+    Num _ f -> NumTy f
+    Str _   -> ObjTy "java/lang/String"
+
+typesOfTail :: (Ord n, Show n) => TypeMap n -> Tail n -> (TypeMap n, [VarType])
+typesOfTail env tl = case tl of
+    Copy              xs -> map (typeOfAtom env) xs
+    Invoke          f _  -> resultTypeOfFun f
+    InvokeUnary   o _    -> [NumTy (resultFormatOfUnary o)]
+    InvokeBinary  o _ _  -> [NumTy (resultFormatOfBinary o)]
+    InvokeVirtual m _ _  -> maybeToList (resultTypeOfIMethod m)
+    InvokeSpecial m _ _  -> maybeToList (resultTypeOfIMethod m)
+    InvokeStatic  m   _  -> maybeToList (resultTypeOfSMethod m)
+    GetField      f _    -> [typeOfIField f]
+    PutField      _ _ _  -> []
+    GetStatic     f      -> [typeOfSField f]
+    PutStatic     _   _  -> []
+  where
+    resultTypeOfFun x = case typeOfAtom env x of
+        FunTy _ os -> os
+        ty         -> error $ "typesOfTail: expected " <> show x
+                           <> " to be a function, but was: " <> show ty
+
+typeOfBinding :: (Ord n, Show n) => Map n VarType -> Binding n -> VarType
+typeOfBinding env binding = case binding of
+    Lambda _ x -> FunTy [] (typesOfTerm env x)
+    Const    x -> case typesOfTerm env x of
+        [t] -> t
+        ts  -> error $ "typeOfBinding: expected singleton result type "
+                    <> "for constant expression, but was: " <> show ts
+
+typesOfTerm :: (Ord n, Show n) => Map n VarType -> Term n -> [VarType]
+typesOfTerm env term = case term of
+    Return tl  -> typesOfTail env tl
+    Iff _ t _  -> typesOfTerm env t
+
+    Let ns x y -> let env' = env `mapUnionR` M.fromList (ns `zip` typesOfTail env x)
+                  in typesOfTerm env' y
+
+    LetRec bs x -> let env' = env `mapUnionR` M.map (typeOfBinding env') bs
+                   in typesOfTerm env' x
+
+-}
+
+------------------------------------------------------------------------
+-- Formats/Types
+
+resultFormatOfUnary :: UnaryOp -> Format
+resultFormatOfUnary op = case op of
+    Neg x   -> x
+    Not x   -> x
+    Cnv _ x -> x
+
+resultFormatOfBinary :: BinaryOp -> Format
+resultFormatOfBinary op = case op of
+    Add x -> x
+    Sub x -> x
+    Mul x -> x
+    Div x -> x
+    Rem x -> x
+    Sla x -> x
+    Sra x -> x
+    Sru x -> x
+    And x -> x
+    Ior x -> x
+    Xor x -> x
+    Ceq x -> x
+    Cne x -> x
+    Clt x -> x
+    Cgt x -> x
+    Cle x -> x
+    Cge x -> x
+
+resultTypeOfIMethod :: IMethod -> Maybe VarType
+resultTypeOfIMethod (IMethod _ _ (MethodType _ t)) = t
+
+resultTypeOfSMethod :: SMethod -> Maybe VarType
+resultTypeOfSMethod (SMethod _ _ (MethodType _ t)) = t
+
+typeOfIField :: IField -> VarType
+typeOfIField (IField _ _ t) = t
+
+typeOfSField :: SField -> VarType
+typeOfSField (SField _ _ t) = t
 
 ------------------------------------------------------------------------
 -- Utils

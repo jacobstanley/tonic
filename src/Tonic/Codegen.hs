@@ -61,15 +61,6 @@ addMethodWith acc name typ code cls = cls { G.cMethods = G.cMethods cls ++ [mth]
 
 ------------------------------------------------------------------------
 
-mangleFunTy :: [VarType] -> [VarType] -> Text
-mangleFunTy ins outs = "F" <> mangle ins <> "$$" <> mangle outs
-  where
-    mangle = T.replace "/" "_"
-           . T.replace ";" "_$"
-           . T.replace "[" "A"
-           . T.concat
-           . map describeVarType
-
 describeVarType :: VarType -> Text
 describeVarType vtyp = case vtyp of
     FunTy ins outs   -> "L" <> mangleFunTy ins outs <> ";"
@@ -89,3 +80,12 @@ describeMethodType (MethodType args ret) = "(" <> args' <> ")" <> ret'
   where
     args' = T.concat (map describeVarType args)
     ret'  = maybe "V" describeVarType ret
+
+mangleFunTy :: [VarType] -> [VarType] -> Text
+mangleFunTy ins outs = "F" <> mangle ins <> "$$" <> mangle outs
+  where
+    mangle = T.replace "/" "_"
+           . T.replace ";" "_$"
+           . T.replace "[" "A"
+           . T.concat
+           . map describeVarType
