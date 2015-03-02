@@ -18,6 +18,7 @@ import qualified Data.Map.Lazy as M
 import           Data.Maybe (mapMaybe, fromJust)
 import           Data.Monoid ((<>), mconcat)
 import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Word (Word8, Word16)
 import           System.IO (IOMode(..), withFile)
@@ -36,18 +37,30 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 main :: IO ()
 main = do
-    -- print foo2
-    -- print (fvOfTerm foo2)
-    -- print (rename $ simplifyTerm foo2)
-    print (foo1)
-    print (deadTerm foo1)
-    print (rename $ deadTerm foo1)
+    writeMain foo0
 
-    (LetRec bs _) <- return foo2
-    withFile "Jvmc.class" WriteMode $ \h -> do
-        let cls = closureOfBinding "toStr" (fromJust (M.lookup "toStr" bs))
-        print cls
-        hPutBuilder h $ bClass cls
+------------------------------------------------------------------------
+
+writeMain :: (Ord n, Show n, PP.Pretty n) => Term n -> IO ()
+writeMain term = do
+    printTerm term
+    mapM_ (writeClass "output") (cls:clss)
+  where
+    vars = [1..] -- start from 1 to skip (string[] args)
+    (code, clss) = codeOfTerm vars M.empty term
+
+    cls = addStaticMethod "main"
+            (MethodType [ArrTy (ObjTy "java/lang/String")] Nothing)
+            (Code 8 code)
+            (mkClass "Main")
+
+writeClass :: FilePath -> G.Class -> IO ()
+writeClass dir cls = do
+    print cls
+    withFile (dir <> "/" <> name <> ".class") WriteMode
+             (\h -> hPutBuilder h (bClass cls))
+  where
+    name = T.unpack (unClassRef (cName cls))
 
 ------------------------------------------------------------------------
 
@@ -78,22 +91,22 @@ jvmc = Class
     , cSourceFile = Just "Jvmc.java"
     }
   where
-    code = Code 8 1 [ G.GetStatic sysOut
-                    , G.PutStatic foo
+    code = Code 8 [ G.GetStatic sysOut
+                  , G.PutStatic foo
 
-                    , G.GetStatic foo
-                    , G.CheckCast printStream
-                    , G.SConst "Hello World!"
-                    , G.InvokeVirtual println
+                  , G.GetStatic foo
+                  , G.CheckCast printStream
+                  , G.SConst "Hello World!"
+                  , G.InvokeVirtual println
 
-                    , G.GetStatic foo
-                    , G.CheckCast printStream
-                    , G.SConst "Goodbye World!"
-                    , G.InvokeVirtual println
+                  , G.GetStatic foo
+                  , G.CheckCast printStream
+                  , G.SConst "Goodbye World!"
+                  , G.InvokeVirtual println
 
-                    , G.IConst 42
-                    , G.InvokeStatic sysExit
-                    , G.Return ]
+                  , G.IConst 42
+                  , G.InvokeStatic sysExit
+                  , G.Return ]
 
     printStream = ClassRef "java/io/PrintStream"
     sysOut  = FieldRef  (ClassRef "java/lang/System")    (NameType "out"     (Type "Ljava/io/PrintStream;"))

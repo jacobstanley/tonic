@@ -9,6 +9,7 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 
 import           Tonic.Types
+import           Tonic.Utils
 
 ------------------------------------------------------------------------
 
@@ -18,11 +19,15 @@ pattern JString = ObjTy "java/lang/String"
 
 foo0 :: Term String
 foo0 =
-    Let [x] (InvokeBinary (Add F32) (Num 42 F32) (Num 18 F32)) $
+    Let [c] (Copy [Num 42 F32]) $
+    Let [x] (InvokeBinary (Add F32) (Var c) (Var c)) $
+    Let [z] (InvokeBinary (Mul F32) (Var c) (Var c)) $
+    Let [w] (InvokeBinary (Sub F32) (Var z) (Var x)) $
     Let [y] (InvokeStatic float2string [Var x]) $
-    Return (PutStatic defaultString (Var y))
+    Let [out] (GetStatic sysOut) $
+    Return (InvokeVirtual println (Var out) [Var y])
   where
-    (x,y) = ("x","y")
+    (c,x,y,z,w,out) = ("c","x","y","z","w","out")
 
 foo1 :: Term String
 foo1 =
@@ -59,11 +64,13 @@ foo2 =
     letrec bs t = LetRec (M.fromList bs) t
 
 float2string :: SMethod
-float2string = SMethod "java/lang/Float" "toString"
-    (MethodType [NF32] (Just JString))
+float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JString))
 
-defaultString :: SField
-defaultString = SField "java/lang/String" "default" (ObjTy "java/lang/String")
+sysOut :: SField
+sysOut = SField  "java/lang/System" "out" (ObjTy "java/io/PrintStream")
+
+println :: IMethod
+println = IMethod "java/io/PrintStream" "println" (MethodType [ObjTy "java/lang/String"] Nothing)
 
 ------------------------------------------------------------------------
 -- Finding Free Variables

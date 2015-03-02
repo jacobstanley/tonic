@@ -85,12 +85,16 @@ ppUnaryOp o = case o of
 ppBinaryOp :: BinaryOp -> Doc
 ppBinaryOp o = case o of
     Add f -> op "+" <> dullred (ppFormat f)
+    Sub f -> op "-" <> dullred (ppFormat f)
+    Mul f -> op "*" <> dullred (ppFormat f)
+    Div f -> op "/" <> dullred (ppFormat f)
     _     -> error "ppBinaryOp"
 
 ppFormat :: Format -> Doc
 ppFormat (Fmt U sz) = text "`U" <> integer sz
 ppFormat (Fmt I sz) = text "`I" <> integer sz
 ppFormat (Fmt F sz) = text "`F" <> integer sz
+ppFormat (Fmt A  _) = text "`A"
 
 ------------------------------------------------------------------------
 

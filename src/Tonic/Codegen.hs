@@ -5,6 +5,7 @@ module Tonic.Codegen where
 
 import           Data.Map (Map)
 import qualified Data.Map as M
+import           Data.Maybe (maybeToList)
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
@@ -22,32 +23,69 @@ data Local = L G.VarIndex Format
 
 ------------------------------------------------------------------------
 
-closureOfBinding :: (Ord n, Show n) => ClassName -> Binding n -> G.Class
-closureOfBinding name (Lambda ftyp@(FunType ins outs) ns x) =
-      addInterface (mangleFunType ftyp)
-    . addMethod "invoke" mtyp (G.Code 8 8 [ret])
-    $ mkClass ("C$" <> name)
+closureOfBinding :: (Ord n, Show n) => ClassName -> Binding n -> (G.Class, [G.Class])
+closureOfBinding name (Lambda ftyp@(FunType ins outs) ns x) = (cls, clss)
   where
-    (ret, mtyp) = case outs of
-        []  -> (G.Return,                 MethodType ins Nothing)
-        [o] -> (iReturn (formatOfType o), MethodType ins (Just o))
-        _   -> error ("closureOfBinding: multiple return values not supported: " <> show name)
+    vars = [0..]
+    ls   = zipWith L vars (map formatOfType ins)
+    env  = M.fromList (ns `zip` ls)
+
+    (code, clss) = codeOfTerm (drop (length ns) vars) env x
+
+    cls = addInterface (mangleFunType ftyp)
+        . addMethod "invoke" mtyp (G.Code 8 code)
+        $ mkClass ("C$" <> name)
+
+    mtyp = case outs of
+        []  -> MethodType ins Nothing
+        [o] -> MethodType ins (Just o)
+        _   -> error $ "closureOfBinding: multiple return "
+                    <> "values not supported: " <> show name
+
+------------------------------------------------------------------------
 
 codeOfTail :: (Ord n, Show n) => Map n Local -> Tail n -> [G.Instruction]
 codeOfTail env tl = case tl of
-    Copy xs             -> map (iPush env) xs
-    InvokeUnary  op x   -> [iPush env x, iUnary op]
-    InvokeBinary op x y -> [iPush env x, iPush env y, iBinary op]
-    _                   -> error ("codeOfTail: unsupported: " <> show tl)
+    Copy xs              -> map (iPush env) xs
+    InvokeUnary  op x    -> [iPush env x, iUnary op]
+    InvokeBinary op x y  -> [iPush env x, iPush env y, iBinary op]
+    InvokeVirtual m i xs -> map (iPush env) (i:xs) <> [G.InvokeVirtual (iMethodRef m)]
+    InvokeSpecial m i xs -> map (iPush env) (i:xs) <> [G.InvokeSpecial (iMethodRef m)]
+    InvokeStatic  m   xs -> map (iPush env) xs     <> [G.InvokeStatic  (sMethodRef m)]
+    GetField      f i    -> [iPush env i]              <> [G.GetField  (iFieldRef f)]
+    PutField      f i x  -> [iPush env i, iPush env x] <> [G.PutField  (iFieldRef f)]
+    GetStatic     f      ->                               [G.GetStatic (sFieldRef f)]
+    PutStatic     f   x  -> [iPush env x]              <> [G.PutStatic (sFieldRef f)]
 
--- InvokeVirtual IMethod  (Atom n) [Atom n]
--- InvokeSpecial IMethod  (Atom n) [Atom n]
--- InvokeStatic  SMethod  [Atom n]
+--codeOfBindings :: (Ord n, Show n) => Bindings n -> ([G.Instruction], [G.Class])
+--codeOfBindings bs = M.map
 
 codeOfTerm :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Term n -> ([G.Instruction], [G.Class])
-codeOfTerm env term = case term of
-    Return x   -> (codeOfTail env x, [])
-    Let ns x y -> codeOfTail env x <> map
+codeOfTerm vars env term = case term of
+    Return x   -> let code0 = codeOfTail env x
+                      code1 = case formatsOfTail env x of
+                        []    -> [G.Return]
+                        [fmt] -> [iReturn fmt]
+                        _     -> error $ "codeOfTerm: multiple return "
+                                      <> "values not supported: " <> show x
+                  in
+                      (code0 <> code1, [])
+
+    Let ns x y -> let code0       = codeOfTail env  x
+
+                      (vars', ls) = allocLocals vars (formatsOfTail env x)
+                      env'        = env `mapUnionR` M.fromList (ns `zip` ls)
+                      code1       = map iStore ls
+
+                      (code2, cs) = codeOfTerm vars' env' y
+                  in
+                      (code0 <> code1 <> code2, cs)
+
+    _ -> error ("codeOfTerm: unsupported: " <> show term)
+
+
+allocLocals :: [G.VarIndex] -> [Format] -> ([G.VarIndex], [Local])
+allocLocals vs fs = (drop (length fs) vs, zipWith L vs fs)
 
 ------------------------------------------------------------------------
 
@@ -177,6 +215,77 @@ addMethodWith acc name typ code cls = cls { G.cMethods = G.cMethods cls ++ [mth]
 formatOfType :: Type -> Format
 formatOfType (NumTy f) = f
 formatOfType _         = Fmt A 0
+
+formatOfLocal :: Local -> Format
+formatOfLocal (L _ f) = f
+
+formatsOfFunType :: FunType -> [Format]
+formatsOfFunType (FunType _ os) = map formatOfType os
+
+formatsOfMethodType :: MethodType -> [Format]
+formatsOfMethodType (MethodType _ os) = map formatOfType (maybeToList os)
+
+formatOfUnary :: UnaryOp -> Format
+formatOfUnary op = case op of
+    Neg f   -> f
+    Not f   -> f
+    Cnv _ f -> f
+
+formatOfBinary :: BinaryOp -> Format
+formatOfBinary op = case op of
+    Add f -> f
+    Sub f -> f
+    Mul f -> f
+    Div f -> f
+    Rem f -> f
+    Sla f -> f
+    Sra f -> f
+    Sru f -> f
+    And f -> f
+    Ior f -> f
+    Xor f -> f
+    Ceq f -> f
+    Cne f -> f
+    Clt f -> f
+    Cgt f -> f
+    Cle f -> f
+    Cge f -> f
+
+formatOfAtom :: (Ord n, Show n) => Map n Local -> Atom n -> Format
+formatOfAtom env atom = case atom of
+    Var x   -> formatOfLocal (unsafeLookup "formatOfAtom" x env)
+    Num _ f -> f
+    Str _   -> Fmt A 0
+
+formatsOfTail :: (Ord n, Show n) => Map n Local -> Tail n -> [Format]
+formatsOfTail env tl = case tl of
+    Copy xs                           -> map (formatOfAtom env) xs
+    Invoke t _ _                      -> formatsOfFunType t
+    InvokeUnary  op _                 -> [formatOfUnary op]
+    InvokeBinary op _ _               -> [formatOfBinary op]
+    InvokeVirtual (IMethod _ _ t) _ _ -> formatsOfMethodType t
+    InvokeSpecial (IMethod _ _ t) _ _ -> formatsOfMethodType t
+    InvokeStatic  (SMethod _ _ t) _   -> formatsOfMethodType t
+    GetField      (IField _ _ t)  _   -> [formatOfType t]
+    PutField      _               _ _ -> []
+    GetStatic     (SField _ _ t)      -> [formatOfType t]
+    PutStatic     _               _   -> []
+
+------------------------------------------------------------------------
+
+iMethodRef :: IMethod -> G.MethodRef
+iMethodRef (IMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
+
+sMethodRef :: SMethod -> G.MethodRef
+sMethodRef (SMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
+
+iFieldRef :: IField -> G.FieldRef
+iFieldRef (IField cls fld ty) = G.FieldRef (G.ClassRef cls) (G.NameType fld (G.Type (describeType ty)))
+
+sFieldRef :: SField -> G.FieldRef
+sFieldRef (SField cls fld ty) = G.FieldRef (G.ClassRef cls) (G.NameType fld (G.Type (describeType ty)))
+
+------------------------------------------------------------------------
 
 describeType :: Type -> Text
 describeType vtyp = case vtyp of

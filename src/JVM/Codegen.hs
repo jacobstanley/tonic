@@ -14,7 +14,7 @@ import           Data.Int (Int8, Int16, Int32, Int64)
 import           Data.List (foldl1')
 import           Data.Map.Lazy (Map)
 import qualified Data.Map.Lazy as M
-import           Data.Maybe (mapMaybe)
+import           Data.Maybe (mapMaybe, fromMaybe)
 import           Data.Monoid ((<>), mconcat)
 import           Data.Text (Text)
 import qualified Data.Text.Encoding as T
@@ -96,7 +96,6 @@ data MethodAccess =
 
 data Code = Code
     { cMaxStack     :: Word16 -- TODO calculate automatically
-    , cMaxLocals    :: Word16 -- TODO calculate automatically
     , cInstructions :: [Instruction]
     } deriving (Eq, Ord, Show, Read)
 
@@ -170,6 +169,7 @@ emptyConstPool = ConstPool (ConstRef 1) []
 ------------------------------------------------------------------------
 
 type VarIndex = Word16
+type NumArgs  = Word8
 
 data Instruction =
       AConstNull
@@ -234,8 +234,10 @@ data Instruction =
     | GetField  FieldRef
     | PutField  FieldRef
 
-    | InvokeVirtual MethodRef
-    | InvokeStatic  MethodRef
+    | InvokeVirtual   MethodRef
+    | InvokeSpecial   MethodRef
+    | InvokeStatic    MethodRef
+    | InvokeInterface MethodRef NumArgs
 
     | CheckCast ClassRef
 
@@ -507,11 +509,29 @@ bCode Code{..} = do
     bcs <- mapM bytecodeOfInstruction cInstructions
     let lbs = toLazyByteString . mconcat . map bytecode $ bcs
     return $ word16BE cMaxStack
-          <> word16BE cMaxLocals
+          <> word16BE (maxLocals + 1)
           <> word32BE (fromIntegral (L.length lbs))
           <> lazyByteString lbs
           <> word16BE 0 -- exception table
           <> word16BE 0 -- attributes
+  where
+    maxLocals = maximum $ map (fromMaybe 0 . varIndexOfInstruction) cInstructions
+
+------------------------------------------------------------------------
+
+varIndexOfInstruction :: Instruction -> Maybe VarIndex
+varIndexOfInstruction i = case i of
+    ILoad  x -> Just x
+    LLoad  x -> Just x
+    FLoad  x -> Just x
+    DLoad  x -> Just x
+    ALoad  x -> Just x
+    IStore x -> Just x
+    LStore x -> Just x
+    FStore x -> Just x
+    DStore x -> Just x
+    AStore x -> Just x
+    _        -> Nothing
 
 ------------------------------------------------------------------------
 
@@ -682,8 +702,10 @@ bytecodeOfInstruction i = case i of
     GetStatic x -> B'GetStatic . unConstRef <$> addFieldRef x
     PutStatic x -> B'PutStatic . unConstRef <$> addFieldRef x
 
-    InvokeVirtual x -> B'InvokeVirtual . unConstRef <$> addMethodRef x
-    InvokeStatic  x -> B'InvokeStatic  . unConstRef <$> addMethodRef x
+    InvokeVirtual   x   -> B'InvokeVirtual   . unConstRef <$> addMethodRef x
+    InvokeSpecial   x   -> B'InvokeSpecial   . unConstRef <$> addMethodRef x
+    InvokeStatic    x   -> B'InvokeStatic    . unConstRef <$> addMethodRef x
+    InvokeInterface x n -> B'InvokeInterface . unConstRef <$> addMethodRef x <*> pure n
 
     CheckCast x -> B'CheckCast . unConstRef <$> addClassRef x
 
