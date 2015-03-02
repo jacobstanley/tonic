@@ -10,6 +10,11 @@ echo "javac Main.java"
 javac Main.java
 pretty Main
 
+cd ../ssa
+echo "javac Main.java"
+javac Main.java
+pretty Main
+
 build_wordcount() {
     CDH=../../../jvmc-libs/cdh-4.6
 

@@ -15,16 +15,34 @@ class Main implements java.lang.Comparable {
   public static void main(java.lang.String[]);
     Signature: ([Ljava/lang/String;)V
     Code:
-       0: getstatic     #2                  // Field java/lang/System.out:Ljava/io/PrintStream;
-       3: ldc           #3                  // String Hello World!
-       5: invokevirtual #4                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
-       8: bipush        42
-      10: invokestatic  #5                  // Method java/lang/System.exit:(I)V
-      13: return        
+       0: bipush        42
+       2: istore_1      
+       3: iload_1       
+       4: iconst_1      
+       5: if_icmple     12
+       8: iconst_1      
+       9: goto          13
+      12: iconst_0      
+      13: istore_2      
+      14: getstatic     #2                  // Field java/lang/System.out:Ljava/io/PrintStream;
+      17: new           #3                  // class java/lang/StringBuilder
+      20: dup           
+      21: invokespecial #4                  // Method java/lang/StringBuilder."<init>":()V
+      24: ldc           #5                  // String Hello World = 
+      26: invokevirtual #6                  // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+      29: iload_2       
+      30: invokevirtual #7                  // Method java/lang/StringBuilder.append:(Z)Ljava/lang/StringBuilder;
+      33: invokevirtual #8                  // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+      36: invokevirtual #9                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+      39: iload_1       
+      40: invokestatic  #10                 // Method java/lang/System.exit:(I)V
+      43: return        
     LineNumberTable:
-      line 11: 0
-      line 12: 8
-      line 13: 13
+      line 10: 0
+      line 11: 3
+      line 12: 14
+      line 13: 39
+      line 14: 43
 
   public int compareTo(java.lang.Object);
     Signature: (Ljava/lang/Object;)I
@@ -32,13 +50,13 @@ class Main implements java.lang.Comparable {
        0: iconst_m1     
        1: ireturn       
     LineNumberTable:
-      line 28: 0
+      line 29: 0
 
   static {};
     Signature: ()V
     Code:
        0: iconst_1      
-       1: putstatic     #6                  // Field foo:I
+       1: putstatic     #11                 // Field foo:I
        4: return        
     LineNumberTable:
       line 2: 0

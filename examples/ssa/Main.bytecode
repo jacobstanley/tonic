@@ -1,0 +1,47 @@
+Compiled from "Main.java"
+public final class Main {
+  public Main();
+    Signature: ()V
+    Code:
+       0: aload_0       
+       1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+       4: return        
+    LineNumberTable:
+      line 3: 0
+
+  public static final void main(java.lang.String[]);
+    Signature: ([Ljava/lang/String;)V
+    Code:
+       0: ldc           #2                  // float 42.0f
+       2: fstore_1      
+       3: fload_1       
+       4: fload_1       
+       5: fadd          
+       6: fstore_2      
+       7: fload_1       
+       8: fload_1       
+       9: fmul          
+      10: fstore_3      
+      11: fload_3       
+      12: fload_2       
+      13: fsub          
+      14: fstore        4
+      16: fload_2       
+      17: invokestatic  #3                  // Method java/lang/Float.toString:(F)Ljava/lang/String;
+      20: astore        5
+      22: getstatic     #4                  // Field java/lang/System.out:Ljava/io/PrintStream;
+      25: astore        6
+      27: aload         6
+      29: aload         5
+      31: invokevirtual #5                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+      34: return        
+    LineNumberTable:
+      line 7: 0
+      line 8: 3
+      line 9: 7
+      line 10: 11
+      line 11: 16
+      line 12: 22
+      line 13: 27
+      line 14: 34
+}

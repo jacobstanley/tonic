@@ -7,9 +7,10 @@ class Main implements Comparable {
     //double quxx = 4.8;
 
     public static void main(String[] args) {
-        //int z = add(foo, sub(3, 2));
-        System.out.println("Hello World!");
-        System.exit(42);
+        int x = 42;
+        boolean b = x > 1;
+        System.out.println("Hello World = " + b);
+        System.exit(x);
     }
 
     //public static int add(int x, int y) {
