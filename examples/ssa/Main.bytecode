@@ -26,22 +26,22 @@ public final class Main {
       12: fload_2       
       13: fsub          
       14: fstore        4
-      16: fload_2       
-      17: invokestatic  #3                  // Method java/lang/Float.toString:(F)Ljava/lang/String;
-      20: astore        5
-      22: getstatic     #4                  // Field java/lang/System.out:Ljava/io/PrintStream;
-      25: astore        6
-      27: aload         6
-      29: aload         5
-      31: invokevirtual #5                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
-      34: return        
+      16: fload         4
+      18: invokestatic  #3                  // Method java/lang/Float.toString:(F)Ljava/lang/String;
+      21: astore        5
+      23: getstatic     #4                  // Field java/lang/System.out:Ljava/io/PrintStream;
+      26: astore        6
+      28: aload         6
+      30: aload         5
+      32: invokevirtual #5                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+      35: return        
     LineNumberTable:
       line 7: 0
       line 8: 3
       line 9: 7
       line 10: 11
       line 11: 16
-      line 12: 22
-      line 13: 27
-      line 14: 34
+      line 12: 23
+      line 13: 28
+      line 14: 35
 }
