@@ -192,6 +192,8 @@ data Instruction =
     | DStore VarIndex
     | AStore VarIndex
 
+    | Dup
+
     | IAdd
     | LAdd
     | FAdd
@@ -239,6 +241,7 @@ data Instruction =
     | InvokeStatic    MethodRef
     | InvokeInterface MethodRef NumArgs
 
+    | New       ClassRef
     | CheckCast ClassRef
 
     deriving (Eq, Ord, Show, Read)
@@ -655,6 +658,7 @@ bytecodeOfInstruction i = case i of
     AStore x | isWide x  -> pure (B'AStore (fromIntegral x))
              | otherwise -> pure (B'AStore_W x)
 
+    Dup -> pure B'Dup
 
     -- Arithmetic --
 
@@ -707,6 +711,7 @@ bytecodeOfInstruction i = case i of
     InvokeStatic    x   -> B'InvokeStatic    . unConstRef <$> addMethodRef x
     InvokeInterface x n -> B'InvokeInterface . unConstRef <$> addMethodRef x <*> pure n
 
+    New       x -> B'New       . unConstRef <$> addClassRef x
     CheckCast x -> B'CheckCast . unConstRef <$> addClassRef x
 
   where

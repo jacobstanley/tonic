@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module Tonic where
 
@@ -10,67 +9,6 @@ import qualified Data.Set as S
 
 import           Tonic.Types
 import           Tonic.Utils
-
-------------------------------------------------------------------------
-
-pattern F32     = Fmt F 32
-pattern NF32    = NumTy (Fmt F 32)
-pattern JString = ObjTy "java/lang/String"
-
-foo0 :: Term String
-foo0 =
-    Let [c] (Copy [Num 42 F32]) $
-    Let [x] (InvokeBinary (Add F32) (Var c) (Var c)) $
-    Let [z] (InvokeBinary (Mul F32) (Var c) (Var c)) $
-    Let [w] (InvokeBinary (Sub F32) (Var z) (Var x)) $
-    Let [y] (InvokeStatic float2string [Var x]) $
-    Let [out] (GetStatic sysOut) $
-    Return (InvokeVirtual println (Var out) [Var y])
-  where
-    (c,x,y,z,w,out) = ("c","x","y","z","w","out")
-
-foo1 :: Term String
-foo1 =
-    Let [x] (Copy [Num 9 F32]) $
-    Let [y] (Copy [Num 1 F32]) $
-    Let [w] (Copy [Num 42 F32]) $
-    letrec [ (u, Const  NF32                   (Return (Copy [Num 42 F32])))
-           , (t, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 1 F32]))) ] $
-    Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
-    Return (InvokeStatic float2string [Var z])
-  where
-    (x,y,z,w,u,t) = ("x","y","z","w","u","t")
-
-    letrec bs tm = LetRec (M.fromList bs) tm
-
-foo2 :: Term String
-foo2 =
-    letrec [ (toStr, Lambda f2s  [n]   (Return (InvokeStatic float2string [Var n])))
-           , (x,     Const  NF32       (Return (Copy [Num 9 F32])))
-           , (y,     Const  NF32       (Return (Copy [Num 1 F32])))
-           , (add,   Lambda ff2f [x,y] (Return (InvokeBinary (Add F32) (Var x) (Var y))))
-           , (f,     Lambda f2f  [w]   (Return (Copy [Var x])))
-           , (g,     Lambda _2f  []    (Return (Copy [Var y]))) ] $
-    Let [z] (Invoke ff2f (Var add) [Var x, Var y]) $
-    Return (Invoke f2s (Var toStr) [Var z])
-  where
-    (x,y,z,w,f,g,n,add,toStr) = ("x","y","z","w","f","g","n","add","toStr")
-
-    ff2f = FunType [NF32, NF32] [NF32]
-    f2f  = FunType [NF32]       [NF32]
-    _2f  = FunType []           [NF32]
-    f2s  = FunType [NF32]       [JString]
-
-    letrec bs t = LetRec (M.fromList bs) t
-
-float2string :: SMethod
-float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JString))
-
-sysOut :: SField
-sysOut = SField  "java/lang/System" "out" (ObjTy "java/io/PrintStream")
-
-println :: IMethod
-println = IMethod "java/io/PrintStream" "println" (MethodType [ObjTy "java/lang/String"] Nothing)
 
 ------------------------------------------------------------------------
 -- Finding Free Variables
@@ -97,6 +35,7 @@ fvOfTail tl = case tl of
     PutField      _ i x  -> fvOfAtom i `S.union` fvOfAtom x
     GetStatic     _      -> S.empty
     PutStatic     _   x  -> fvOfAtom x
+    New           _   xs -> fvOfAtoms xs
 
 fvOfBinding :: Ord n => Binding n -> Set n
 fvOfBinding binding = case binding of
@@ -141,6 +80,7 @@ renameTail names tl = case tl of
     PutField      f i x  -> PutField      f (renameAtom names i) (renameAtom names x)
     GetStatic     f      -> GetStatic     f
     PutStatic     f   x  -> PutStatic     f (renameAtom names x)
+    New           c   xs -> New           c (renameAtoms names xs)
 
 renameBindings :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Bindings a -> ([b], Map a b, Bindings b)
 renameBindings gen names as = (gen2, names', bs)
@@ -216,6 +156,7 @@ substTail subs tl = case tl of
     PutField      f i x  -> PutField      f (substAtom subs i) (substAtom subs x)
     GetStatic     f      -> GetStatic     f
     PutStatic     f   x  -> PutStatic     f (substAtom subs x)
+    New           c   xs -> New           c (substAtoms subs xs)
 
 substBinding :: Ord n => Map n (Atom n) -> Binding n -> Binding n
 substBinding subs binding = case binding of

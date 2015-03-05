@@ -25,6 +25,9 @@ data Tail n =
     | PutField  IField (Atom n) (Atom n)
     | GetStatic SField
     | PutStatic SField (Atom n)
+
+    | New Constructor [Atom n]
+
     deriving (Eq, Ord, Show)
 
 type Bindings n = Map n (Binding n)
@@ -111,6 +114,10 @@ data MethodType = MethodType [Type] (Maybe Type)
 type ClassName  = Text
 type MethodName = Text
 type FieldName  = Text
+
+-- | Constructors.
+data Constructor = Constructor ClassName MethodType
+    deriving (Eq, Ord, Show)
 
 -- | Instance method.
 data IMethod = IMethod ClassName MethodName MethodType

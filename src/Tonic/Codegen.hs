@@ -3,44 +3,97 @@
 
 module Tonic.Codegen where
 
+import           Control.Arrow (first)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Maybe (maybeToList)
-import           Data.Monoid ((<>))
 import           Data.Set (Set)
 import qualified Data.Set as S
+import           Data.Maybe (maybeToList)
+import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as T
 
 import qualified JVM.Codegen as G
+
+import           Tonic
 import           Tonic.Types
 import           Tonic.Utils
 
 ------------------------------------------------------------------------
 
-data Local = L G.VarIndex Format
+data Local = L G.VarIndex Type
     deriving (Eq, Ord, Show)
 
 ------------------------------------------------------------------------
 
-closureOfBinding :: (Ord n, Show n) => ClassName -> Binding n -> (G.Class, [G.Class])
-closureOfBinding name (Lambda ftyp@(FunType ins outs) ns x) = (cls, clss)
+interfacesOfBinding :: Binding n -> Set G.Class
+interfacesOfBinding (Const  _   x) = interfacesOfTerm x
+interfacesOfBinding (Lambda t _ x) = interfacesOfTerm x `S.union` S.singleton iface
   where
-    vars = [0..]
-    ls   = zipWith L vars (map formatOfType ins)
-    env  = M.fromList (ns `zip` ls)
+    iface = (mkInterface $ mangleFunType t) {
+              G.cMethods = [G.Method acc "invoke" mtyp Nothing]
+            }
 
-    (code, clss) = codeOfTerm (drop (length ns) vars) env x
+    acc  = [G.M'Public, G.M'Abstract]
+    mtyp = G.Type (describeMethodType (methodTypeOfFunType t))
 
-    cls = addInterface (mangleFunType ftyp)
-        . addMethod "invoke" mtyp (G.Code 8 code)
-        $ mkClass ("C$" <> name)
+interfacesOfTerm :: Term n -> Set G.Class
+interfacesOfTerm term = case term of
+    Return    _ -> S.empty
+    Iff   _ t e -> interfacesOfTerm t <> interfacesOfTerm e
+    Let   _ _ x -> interfacesOfTerm x
+    LetRec bs x -> S.unions (map interfacesOfBinding (M.elems bs)) <> interfacesOfTerm x
 
-    mtyp = case outs of
-        []  -> MethodType ins Nothing
-        [o] -> MethodType ins (Just o)
-        _   -> error $ "closureOfBinding: multiple return "
-                    <> "values not supported: " <> show name
+------------------------------------------------------------------------
+
+closureOfBinding :: (Ord n, Show n) => Map n Type -> ClassName -> Binding n -> (G.Class, [G.Class])
+closureOfBinding scopeTys name (Lambda ftyp@(FunType argTys outTys) argNs term) = (cls, clss)
+  where
+    flds   = M.toList (scopeTys `mapIntersectionS` fvOfTerm term)
+    fldNs  = map fst flds
+    fldTys = map snd flds
+
+    vars0  = [1..]
+    vars1 = drop (length argNs) vars0
+    vars2 = drop (length fldNs) vars1
+
+    argLocals = zipWith L vars0 argTys
+    fldLocals = zipWith L vars1 fldTys
+
+    env = M.fromList (argNs `zip` argLocals) `mapUnionR`
+          M.fromList (fldNs `zip` fldLocals)
+
+    (code, clss) = codeOfTerm vars2 env term'
+    term' = foldr (.) id (map assignField flds) term
+
+    assignField (n, t) =
+        Let [n] (GetField fld (Num 1 (Fmt A 0)))
+      where
+        fld = IField clsName (fieldName n) t
+
+    cls = addFields flds
+        . addInterface (mangleFunType ftyp)
+        . addMethod "invoke" (methodTypeOfFunType ftyp) (G.Code 8 code)
+        . addEmptyConstructor
+        $ mkClass clsName
+
+    clsName = "C$" <> name
+
+methodTypeOfFunType :: FunType -> MethodType
+methodTypeOfFunType ft@(FunType argTys outTys) = case outTys of
+    []    -> MethodType argTys Nothing
+    [typ] -> MethodType argTys (Just typ)
+    _     -> error $ "methodTypeOfFunType: multiple return "
+                  <> "values not supported: " <> show ft
+
+addFields :: Show n => [(n, Type)] -> G.Class -> G.Class
+addFields = foldr (.) id . map (uncurry addField)
+
+addField :: Show n => n -> Type -> G.Class -> G.Class
+addField n t = addFieldWith [G.F'Private] (fieldName n) t
+
+fieldName :: Show n => n -> FieldName
+fieldName n = "_" <> T.replace "\"" "" (T.pack (show n))
 
 ------------------------------------------------------------------------
 
@@ -56,36 +109,60 @@ codeOfTail env tl = case tl of
     PutField      f i x  -> [iPush env i, iPush env x] <> [G.PutField  (iFieldRef f)]
     GetStatic     f      ->                               [G.GetStatic (sFieldRef f)]
     PutStatic     f   x  -> [iPush env x]              <> [G.PutStatic (sFieldRef f)]
-
---codeOfBindings :: (Ord n, Show n) => Bindings n -> ([G.Instruction], [G.Class])
---codeOfBindings bs = M.map
+    New           c   xs -> [G.New (cClassRef c), G.Dup]
+                         <> map (iPush env) xs
+                         <> [G.InvokeSpecial (cMethodRef c)]
 
 codeOfTerm :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Term n -> ([G.Instruction], [G.Class])
 codeOfTerm vars env term = case term of
-    Return x   -> let code0 = codeOfTail env x
-                      code1 = case formatsOfTail env x of
-                        []    -> [G.Return]
-                        [fmt] -> [iReturn fmt]
-                        _     -> error $ "codeOfTerm: multiple return "
-                                      <> "values not supported: " <> show x
-                  in
-                      (code0 <> code1, [])
+    Return x    -> let code0 = codeOfTail env x
+                       code1 = case typesOfTail env x of
+                         []    -> [G.Return]
+                         [typ] -> [iReturn typ]
+                         _     -> error $ "codeOfTerm: multiple return "
+                                       <> "values not supported: " <> show x
+                   in
+                       (code0 <> code1, [])
 
-    Let ns x y -> let code0       = codeOfTail env  x
+    Let ns x y  -> let code0       = codeOfTail env  x
 
-                      (vars', ls) = allocLocals vars (formatsOfTail env x)
-                      env'        = env `mapUnionR` M.fromList (ns `zip` ls)
-                      code1       = map iStore ls
+                       (vars', ls) = allocLocals vars (typesOfTail env x)
+                       env'        = env `mapUnionR` M.fromList (ns `zip` ls)
+                       code1       = map iStore ls
 
-                      (code2, cs) = codeOfTerm vars' env' y
-                  in
-                      (code0 <> code1 <> code2, cs)
+                       (code2, cs) = codeOfTerm vars' env' y
+                   in
+                       (code0 <> code1 <> code2, cs)
+
+    LetRec bs x -> codeOfLetRec vars env bs x
 
     _ -> error ("codeOfTerm: unsupported: " <> show term)
 
 
-allocLocals :: [G.VarIndex] -> [Format] -> ([G.VarIndex], [Local])
-allocLocals vs fs = (drop (length fs) vs, zipWith L vs fs)
+codeOfLetRec :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Bindings n -> Term n -> ([G.Instruction], [G.Class])
+codeOfLetRec vars env bs term = (code0 <> code1, clss0 <> clss1)
+  where
+    (vars', ls) = allocLocals vars (map typeOfBinding (M.elems bs))
+    env'        = env `mapUnionR` M.fromList (M.keys bs `zip` ls)
+    code0       = concat $ zipWith (\xs y -> xs ++ [y])
+                                   (map (codeOfTail env) news)
+                                   (map iStore ls)
+
+    news = map new (M.toList bs)
+    new (n, b) = New (ctor n) []
+
+    className = T.replace "\"" "" . T.pack . show
+    ctor n    = Constructor ("C$" <> className n) (MethodType [] Nothing)
+
+    scopeTys  = M.map typeOfLocal env `mapUnionR` M.map typeOfBinding bs
+    closure   = uncurry (:) . uncurry (closureOfBinding scopeTys)
+    clss0     = concatMap (closure . first className) (M.toList bs)
+
+    (code1, clss1) = codeOfTerm vars' env' term
+
+
+allocLocals :: [G.VarIndex] -> [Type] -> ([G.VarIndex], [Local])
+allocLocals vs ts = (drop (length ts) vs, zipWith L vs ts)
 
 ------------------------------------------------------------------------
 
@@ -137,6 +214,7 @@ iPush env atom = case atom of
 
 iConst :: Rational -> Format -> G.Instruction
 iConst 0 (Fmt A _) = G.AConstNull
+iConst 1 (Fmt A _) = G.ALoad 0
 iConst x fmt       = case fmt of
     Fmt I s | s <= 32 -> G.IConst (truncate x)
             | s <= 64 -> G.LConst (truncate x)
@@ -145,32 +223,32 @@ iConst x fmt       = case fmt of
     _                 -> error ("iConst: cannot load constant: " <> show x <> " (with format: " <> show fmt <> ")")
 
 iLoad :: Local -> G.Instruction
-iLoad (L idx fmt) = case fmt of
+iLoad (L idx typ) = case formatOfType typ of
     Fmt A _           -> G.ALoad idx
     Fmt I s | s <= 32 -> G.ILoad idx
             | s <= 64 -> G.LLoad idx
     Fmt F s | s <= 32 -> G.FLoad idx
             | s <= 64 -> G.DLoad idx
-    _                 -> error ("iLoad: cannot load format: " <> show fmt)
+    fmt               -> error ("iLoad: cannot load format: " <> show fmt)
 
 iStore :: Local -> G.Instruction
-iStore (L idx fmt) = case fmt of
+iStore (L idx typ) = case formatOfType typ of
     Fmt A _           -> G.AStore idx
     Fmt I s | s <= 32 -> G.IStore idx
             | s <= 64 -> G.LStore idx
     Fmt F s | s <= 32 -> G.FStore idx
             | s <= 64 -> G.DStore idx
-    _                 -> error ("iStore: cannot store format: " <> show fmt)
+    fmt               -> error ("iStore: cannot store format: " <> show fmt)
 
-iReturn :: Format -> G.Instruction
-iReturn (Fmt g s) = case g of
-    U | s <= 32 -> G.IReturn
-      | s <= 64 -> G.LReturn
-    I | s <= 32 -> G.IReturn
-      | s <= 64 -> G.LReturn
-    F | s <= 32 -> G.FReturn
-      | s <= 64 -> G.DReturn
-    A           -> G.AReturn
+iReturn :: Type -> G.Instruction
+iReturn typ = case formatOfType typ of
+    Fmt U s | s <= 32 -> G.IReturn
+            | s <= 64 -> G.LReturn
+    Fmt I s | s <= 32 -> G.IReturn
+            | s <= 64 -> G.LReturn
+    Fmt F s | s <= 32 -> G.FReturn
+            | s <= 64 -> G.DReturn
+    Fmt A _           -> G.AReturn
 
 ------------------------------------------------------------------------
 
@@ -185,14 +263,21 @@ mkClass name = G.Class
     , G.cSourceFile = Nothing
     }
 
+mkInterface :: ClassName -> G.Class
+mkInterface name = (mkClass name) { G.cAccess = [ G.C'Public, G.C'Interface, G.C'Abstract ] }
+
 addInterface :: ClassName -> G.Class -> G.Class
 addInterface name cls = cls { G.cInterfaces = G.cInterfaces cls ++ [G.ClassRef name] }
 
-addField :: FieldName -> Type -> G.Class -> G.Class
-addField = addFieldWith [G.F'Private, G.F'Final]
+addEmptyConstructor :: G.Class -> G.Class
+addEmptyConstructor =
+    addMethodWith [G.M'Public] "<init>" (MethodType [] Nothing) (G.Code 8 code)
+  where
+    code = [ G.ALoad 0
+           , G.InvokeSpecial (cMethodRef ctor)
+           , G.Return ]
 
-addStaticField :: FieldName -> Type -> G.Class -> G.Class
-addStaticField = addFieldWith [G.F'Private, G.F'Static, G.F'Final]
+    ctor = Constructor "java/lang/Object" (MethodType [] Nothing)
 
 addMethod :: MethodName -> MethodType -> G.Code -> G.Class -> G.Class
 addMethod = addMethodWith [G.M'Public, G.M'Final]
@@ -216,23 +301,23 @@ formatOfType :: Type -> Format
 formatOfType (NumTy f) = f
 formatOfType _         = Fmt A 0
 
-formatOfLocal :: Local -> Format
-formatOfLocal (L _ f) = f
+typeOfLocal :: Local -> Type
+typeOfLocal (L _ t) = t
 
-formatsOfFunType :: FunType -> [Format]
-formatsOfFunType (FunType _ os) = map formatOfType os
+outputsOfFunType :: FunType -> [Type]
+outputsOfFunType (FunType _ os) = os
 
-formatsOfMethodType :: MethodType -> [Format]
-formatsOfMethodType (MethodType _ os) = map formatOfType (maybeToList os)
+outputsOfMethodType :: MethodType -> [Type]
+outputsOfMethodType (MethodType _ os) = maybeToList os
 
-formatOfUnary :: UnaryOp -> Format
-formatOfUnary op = case op of
+typeOfUnary :: UnaryOp -> Type
+typeOfUnary op = NumTy $ case op of
     Neg f   -> f
     Not f   -> f
     Cnv _ f -> f
 
-formatOfBinary :: BinaryOp -> Format
-formatOfBinary op = case op of
+typeOfBinary :: BinaryOp -> Type
+typeOfBinary op = NumTy $ case op of
     Add f -> f
     Sub f -> f
     Mul f -> f
@@ -251,27 +336,38 @@ formatOfBinary op = case op of
     Cle f -> f
     Cge f -> f
 
-formatOfAtom :: (Ord n, Show n) => Map n Local -> Atom n -> Format
-formatOfAtom env atom = case atom of
-    Var x   -> formatOfLocal (unsafeLookup "formatOfAtom" x env)
-    Num _ f -> f
-    Str _   -> Fmt A 0
+typeOfAtom :: (Ord n, Show n) => Map n Local -> Atom n -> Type
+typeOfAtom env atom = case atom of
+    Var x   -> typeOfLocal (unsafeLookup "typeOfAtom" x env)
+    Num _ f -> NumTy f
+    Str _   -> ObjTy "java/lang/String"
 
-formatsOfTail :: (Ord n, Show n) => Map n Local -> Tail n -> [Format]
-formatsOfTail env tl = case tl of
-    Copy xs                           -> map (formatOfAtom env) xs
-    Invoke t _ _                      -> formatsOfFunType t
-    InvokeUnary  op _                 -> [formatOfUnary op]
-    InvokeBinary op _ _               -> [formatOfBinary op]
-    InvokeVirtual (IMethod _ _ t) _ _ -> formatsOfMethodType t
-    InvokeSpecial (IMethod _ _ t) _ _ -> formatsOfMethodType t
-    InvokeStatic  (SMethod _ _ t) _   -> formatsOfMethodType t
-    GetField      (IField _ _ t)  _   -> [formatOfType t]
+typesOfTail :: (Ord n, Show n) => Map n Local -> Tail n -> [Type]
+typesOfTail env tl = case tl of
+    Copy xs                           -> map (typeOfAtom env) xs
+    Invoke t _ _                      -> outputsOfFunType t
+    InvokeUnary  op _                 -> [typeOfUnary op]
+    InvokeBinary op _ _               -> [typeOfBinary op]
+    InvokeVirtual (IMethod _ _ t) _ _ -> outputsOfMethodType t
+    InvokeSpecial (IMethod _ _ t) _ _ -> outputsOfMethodType t
+    InvokeStatic  (SMethod _ _ t) _   -> outputsOfMethodType t
+    GetField      (IField _ _ t)  _   -> [t]
     PutField      _               _ _ -> []
-    GetStatic     (SField _ _ t)      -> [formatOfType t]
+    GetStatic     (SField _ _ t)      -> [t]
     PutStatic     _               _   -> []
+    New           (Constructor c _) _ -> [ObjTy c]
+
+typeOfBinding :: Binding n -> Type
+typeOfBinding (Lambda t _ _) = FunTy t
+typeOfBinding (Const  t _)   = t
 
 ------------------------------------------------------------------------
+
+cClassRef :: Constructor -> G.ClassRef
+cClassRef (Constructor cls _) = G.ClassRef cls
+
+cMethodRef :: Constructor -> G.MethodRef
+cMethodRef (Constructor cls ty) = G.MethodRef (G.ClassRef cls) (G.NameType "<init>" (G.Type (describeMethodType ty)))
 
 iMethodRef :: IMethod -> G.MethodRef
 iMethodRef (IMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
@@ -308,7 +404,7 @@ describeMethodType (MethodType args ret) = "(" <> args' <> ")" <> ret'
     ret'  = maybe "V" describeType ret
 
 mangleFunType :: FunType -> Text
-mangleFunType (FunType ins outs) = "F" <> mangle ins <> "$$" <> mangle outs
+mangleFunType (FunType ins outs) = "G" <> mangle ins <> "$$" <> mangle outs
   where
     mangle = T.replace "/" "_"
            . T.replace ";" "_$"

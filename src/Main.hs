@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -w #-}
 
@@ -13,8 +14,10 @@ import           Data.ByteString.Builder
 import qualified Data.ByteString.Lazy as L
 import           Data.Int (Int8, Int16, Int32, Int64)
 import           Data.List (foldl1')
-import           Data.Map.Lazy (Map)
-import qualified Data.Map.Lazy as M
+import           Data.Map (Map)
+import qualified Data.Map as M
+import           Data.Set (Set)
+import qualified Data.Set as S
 import           Data.Maybe (mapMaybe, fromJust)
 import           Data.Monoid ((<>), mconcat)
 import           Data.Text (Text)
@@ -25,7 +28,6 @@ import           System.IO (IOMode(..), withFile)
 
 import qualified JVM.Codegen as G
 import           JVM.Codegen hiding (Instruction(..))
-import           Tonic (foo0, foo1, foo2)
 import           Tonic
 import           Tonic.Codegen
 import           Tonic.Pretty
@@ -37,17 +39,89 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 main :: IO ()
 main = do
-    writeMain foo0
+    --let lam = Lambda (FunType [] [NF32]) [] $
+    --          Let ["r"] (InvokeBinary (Add F32) (Var "x") (Num 1 F32)) $
+    --          Return (Copy [Var "r"])
+
+    --let (cls, clss) = closureOfBinding (M.fromList [("x", NumTy F32)]) "f" lam
+    --mapM_ (writeClass "output") (cls:clss)
+
+    writeMain foo1
+
+------------------------------------------------------------------------
+
+pattern F32     = Fmt F 32
+pattern NF32    = NumTy (Fmt F 32)
+pattern JString = ObjTy "java/lang/String"
+
+foo0 :: Term String
+foo0 =
+    Let [c] (Copy [Num 42 F32]) $
+    Let [x] (InvokeBinary (Add F32) (Var c) (Var c)) $
+    Let [z] (InvokeBinary (Mul F32) (Var c) (Var c)) $
+    Let [w] (InvokeBinary (Sub F32) (Var z) (Var x)) $
+    Let [y] (InvokeStatic float2string [Var w]) $
+    Let [out] (GetStatic sysOut) $
+    Return (InvokeVirtual println (Var out) [Var y])
+  where
+    (c,x,y,z,w,out) = ("c","x","y","z","w","out")
+
+foo1 :: Term String
+foo1 =
+    Let [x] (Copy [Num 9 F32]) $
+    Let [y] (Copy [Num 1 F32]) $
+    Let [w] (Copy [Num 42 F32]) $
+    letrec [ (u, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 42 F32])))
+           , (t, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 1 F32]))) ] $
+    Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
+    Let [s] (InvokeStatic float2string [Var z]) $
+    Let [out] (GetStatic sysOut) $
+    Return (InvokeVirtual println (Var out) [Var s])
+  where
+    (x,y,z,w,u,t,s,out) = ("x","y","z","w","u","t","s","out")
+
+    letrec bs tm = LetRec (M.fromList bs) tm
+
+foo2 :: Term String
+foo2 =
+    letrec [ (toStr, Lambda f2s  [n]   (Return (InvokeStatic float2string [Var n])))
+           , (x,     Const  NF32       (Return (Copy [Num 9 F32])))
+           , (y,     Const  NF32       (Return (Copy [Num 1 F32])))
+           , (add,   Lambda ff2f [x,y] (Return (InvokeBinary (Add F32) (Var x) (Var y))))
+           , (f,     Lambda f2f  [w]   (Return (Copy [Var x])))
+           , (g,     Lambda _2f  []    (Return (Copy [Var y]))) ] $
+    Let [z] (Invoke ff2f (Var add) [Var x, Var y]) $
+    Return (Invoke f2s (Var toStr) [Var z])
+  where
+    (x,y,z,w,f,g,n,add,toStr) = ("x","y","z","w","f","g","n","add","toStr")
+
+    ff2f = FunType [NF32, NF32] [NF32]
+    f2f  = FunType [NF32]       [NF32]
+    _2f  = FunType []           [NF32]
+    f2s  = FunType [NF32]       [JString]
+
+    letrec bs t = LetRec (M.fromList bs) t
+
+float2string :: SMethod
+float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JString))
+
+sysOut :: SField
+sysOut = SField  "java/lang/System" "out" (ObjTy "java/io/PrintStream")
+
+println :: IMethod
+println = IMethod "java/io/PrintStream" "println" (MethodType [ObjTy "java/lang/String"] Nothing)
 
 ------------------------------------------------------------------------
 
 writeMain :: (Ord n, Show n, PP.Pretty n) => Term n -> IO ()
 writeMain term = do
     printTerm term
-    mapM_ (writeClass "output") (cls:clss)
+    mapM_ (writeClass "output") (cls:clss ++ ifcs)
   where
     vars = [1..] -- start from 1 to skip (string[] args)
     (code, clss) = codeOfTerm vars M.empty term
+
+    ifcs = S.toList (interfacesOfTerm term)
 
     cls = addStaticMethod "main"
             (MethodType [ArrTy (ObjTy "java/lang/String")] Nothing)

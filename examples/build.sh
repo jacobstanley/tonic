@@ -9,6 +9,7 @@ cd hello-world
 echo "javac Main.java"
 javac Main.java
 pretty Main
+pretty Invoke
 
 cd ../ssa
 echo "javac Main.java"

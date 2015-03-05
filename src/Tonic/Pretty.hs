@@ -48,6 +48,7 @@ ppTail tl = case tl of
     PutField      f i x  -> kw "putfield"      <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
     GetStatic     f      -> kw "getstatic"     <+> ppSField  f
     PutStatic     f x    -> kw "putstatic"     <+> ppSField  f <+> op "<-" <+> ppAtom x
+    New           c   xs -> kw "new"           <+> ppConstructor c <+> ppAtoms xs
 
 ppBinding :: Pretty n => Binding n -> Doc
 ppBinding binding = case binding of
@@ -97,6 +98,9 @@ ppFormat (Fmt F sz) = text "`F" <> integer sz
 ppFormat (Fmt A  _) = text "`A"
 
 ------------------------------------------------------------------------
+
+ppConstructor :: Constructor -> Doc
+ppConstructor (Constructor cls _) = yellow $ text (T.unpack cls)
 
 ppSMethod :: SMethod -> Doc
 ppSMethod (SMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
