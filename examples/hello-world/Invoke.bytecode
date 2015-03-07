@@ -1,0 +1,5 @@
+Compiled from "Main.java"
+interface Invoke {
+  public abstract void invoke(int);
+    Signature: (I)V
+}

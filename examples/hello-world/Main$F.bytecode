@@ -1,0 +1,31 @@
+Compiled from "Main.java"
+public class Main$F {
+  private float x;
+    Signature: F
+
+  final Main this$0;
+    Signature: LMain;
+
+  public Main$F(Main);
+    Signature: (LMain;)V
+    Code:
+       0: aload_0       
+       1: aload_1       
+       2: putfield      #2                  // Field this$0:LMain;
+       5: aload_0       
+       6: invokespecial #3                  // Method java/lang/Object."<init>":()V
+       9: return        
+    LineNumberTable:
+      line 13: 0
+
+  static float access$002(Main$F, float);
+    Signature: (LMain$F;F)F
+    Code:
+       0: aload_0       
+       1: fload_1       
+       2: dup_x1        
+       3: putfield      #1                  // Field x:F
+       6: freturn       
+    LineNumberTable:
+      line 13: 0
+}

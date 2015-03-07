@@ -1,5 +1,19 @@
+interface Invoke {
+    void invoke(int x);
+}
+
 class Main implements Comparable {
-    static int foo = 1;
+    private float foo;
+
+    public Main() {
+        F f = new F();
+        f.x = 10.0f;
+    }
+
+    public class F {
+        private float x;
+    }
+
     //static float bar = 2.5f;
 
     //too hard basket :)
@@ -7,6 +21,8 @@ class Main implements Comparable {
     //double quxx = 4.8;
 
     public static void main(String[] args) {
+        Main main = new Main();
+
         int x = 42;
         boolean b = x > 1;
         System.out.println("Hello World = " + b);
