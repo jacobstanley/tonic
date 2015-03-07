@@ -17,8 +17,8 @@ data Tail n =
     | Invoke        FunType  (Atom n) [Atom n]
     | InvokeUnary   UnaryOp  (Atom n)
     | InvokeBinary  BinaryOp (Atom n) (Atom n)
-    | InvokeVirtual IMethod  (Atom n) [Atom n]
-    | InvokeSpecial IMethod  (Atom n) [Atom n]
+    | InvokeVirtual VMethod  (Atom n) [Atom n]
+    | InvokeSpecial VMethod  (Atom n) [Atom n]
     | InvokeStatic  SMethod  [Atom n]
 
     | GetField  IField (Atom n)
@@ -119,12 +119,16 @@ type FieldName  = Text
 data Constructor = Constructor ClassName MethodType
     deriving (Eq, Ord, Show)
 
--- | Instance method.
-data IMethod = IMethod ClassName MethodName MethodType
+-- | Virtual method.
+data VMethod = VMethod ClassName MethodName MethodType
     deriving (Eq, Ord, Show)
 
 -- | Static method.
 data SMethod = SMethod ClassName MethodName MethodType
+    deriving (Eq, Ord, Show)
+
+-- | Interface method.
+data IMethod = IMethod ClassName MethodName MethodType
     deriving (Eq, Ord, Show)
 
 -- | Instance field.

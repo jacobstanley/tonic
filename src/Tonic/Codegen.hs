@@ -29,16 +29,20 @@ data Local = L G.VarIndex Type
 
 codeOfTail :: (Ord n, Show n) => Map n Local -> Tail n -> [G.Instruction]
 codeOfTail env tl = case tl of
-    Copy xs              -> map (iPush env) xs
+    Copy              xs -> map (iPush env) xs
+    Invoke       ft f xs -> map (iPush env) (f:xs)
+                         <> [G.InvokeInterface (fMethodRef ft) (fromIntegral (length xs + 1))]
+
     InvokeUnary  op x    -> [iPush env x, iUnary op]
     InvokeBinary op x y  -> [iPush env x, iPush env y, iBinary op]
-    InvokeVirtual m i xs -> map (iPush env) (i:xs) <> [G.InvokeVirtual (iMethodRef m)]
-    InvokeSpecial m i xs -> map (iPush env) (i:xs) <> [G.InvokeSpecial (iMethodRef m)]
+    InvokeVirtual m i xs -> map (iPush env) (i:xs) <> [G.InvokeVirtual (vMethodRef m)]
+    InvokeSpecial m i xs -> map (iPush env) (i:xs) <> [G.InvokeSpecial (vMethodRef m)]
     InvokeStatic  m   xs -> map (iPush env) xs     <> [G.InvokeStatic  (sMethodRef m)]
     GetField      f i    -> [iPush env i]              <> [G.GetField  (iFieldRef f)]
     PutField      f i x  -> [iPush env i, iPush env x] <> [G.PutField  (iFieldRef f)]
     GetStatic     f      ->                               [G.GetStatic (sFieldRef f)]
     PutStatic     f   x  -> [iPush env x]              <> [G.PutStatic (sFieldRef f)]
+
     New           c   xs -> [G.New (cClassRef c), G.Dup]
                          <> map (iPush env) xs
                          <> [G.InvokeSpecial (cMethodRef c)]
@@ -93,8 +97,8 @@ codeOfLetRec vars env bs term = (code0 <> code1, concat clsss0 <> clss1)
                        <> map (nLoad . fst) flds
                        <> [ G.InvokeVirtual (initRef n (map snd flds)) ]
 
-    ctorRef n    = iMethodRef (IMethod (className n) "<init>" (MethodType [] Nothing))
-    initRef n ts = iMethodRef (IMethod (className n)  "init"  (MethodType ts Nothing))
+    ctorRef n    = vMethodRef (VMethod (className n) "<init>" (MethodType [] Nothing))
+    initRef n ts = vMethodRef (VMethod (className n)  "init"  (MethodType ts Nothing))
 
     nLoad n = iLoad (unsafeLookup "codeOfLetRec" n env')
 
@@ -136,19 +140,11 @@ closureOfBinding scopeTys (clsName, Lambda ftyp@(FunType argTys outTys) argNs te
         . addEmptyCtor
         $ mkClass clsName
 
-methodTypeOfFunType :: FunType -> MethodType
-methodTypeOfFunType ft@(FunType argTys outTys) = case outTys of
-    []    -> MethodType argTys Nothing
-    [typ] -> MethodType argTys (Just typ)
-    _     -> error $ "methodTypeOfFunType: multiple return "
-                  <> "values not supported: " <> show ft
-
 addFields :: Show n => [(n, Type)] -> G.Class -> G.Class
 addFields = foldr (.) id . map (uncurry addField)
 
 addField :: Show n => n -> Type -> G.Class -> G.Class
 addField n t = addFieldWith [G.F'Private, G.F'Final] (fieldName n) t
---addField n t = addFieldWith [G.F'Public] (fieldName n) t
 
 fieldName :: Show n => n -> FieldName
 fieldName n = "_" <> T.replace "\"" "" (T.pack (show n))
@@ -174,8 +170,8 @@ addEmptyCtor cls =
                   (MethodType [] Nothing)
                   (G.Code 8 code) cls
   where
-    code = [G.ALoad 0, G.InvokeSpecial (iMethodRef objInit), G.Return]
-    objInit = IMethod "java/lang/Object" "<init>" (MethodType [] Nothing)
+    code = [G.ALoad 0, G.InvokeSpecial (vMethodRef objInit), G.Return]
+    objInit = VMethod "java/lang/Object" "<init>" (MethodType [] Nothing)
 
 ------------------------------------------------------------------------
 
@@ -371,8 +367,8 @@ typesOfTail env tl = case tl of
     Invoke t _ _                      -> outputsOfFunType t
     InvokeUnary  op _                 -> [typeOfUnary op]
     InvokeBinary op _ _               -> [typeOfBinary op]
-    InvokeVirtual (IMethod _ _ t) _ _ -> outputsOfMethodType t
-    InvokeSpecial (IMethod _ _ t) _ _ -> outputsOfMethodType t
+    InvokeVirtual (VMethod _ _ t) _ _ -> outputsOfMethodType t
+    InvokeSpecial (VMethod _ _ t) _ _ -> outputsOfMethodType t
     InvokeStatic  (SMethod _ _ t) _   -> outputsOfMethodType t
     GetField      (IField _ _ t)  _   -> [t]
     PutField      _               _ _ -> []
@@ -392,11 +388,24 @@ cClassRef (Constructor cls _) = G.ClassRef cls
 cMethodRef :: Constructor -> G.MethodRef
 cMethodRef (Constructor cls ty) = G.MethodRef (G.ClassRef cls) (G.NameType "<init>" (G.Type (describeMethodType ty)))
 
-iMethodRef :: IMethod -> G.MethodRef
-iMethodRef (IMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
+fInterfaceRef :: FunType -> G.ClassRef
+fInterfaceRef = G.ClassRef . mangleFunType
+
+fMethodRef :: FunType -> G.IMethodRef
+fMethodRef ft = G.IMethodRef (G.ClassRef cls) (G.NameType "invoke" (G.Type desc))
+  where
+    cls  = mangleFunType ft
+    mt   = methodTypeOfFunType ft
+    desc = describeMethodType mt
+
+vMethodRef :: VMethod -> G.MethodRef
+vMethodRef (VMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
 
 sMethodRef :: SMethod -> G.MethodRef
 sMethodRef (SMethod cls mth ty) = G.MethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
+
+iMethodRef :: IMethod -> G.IMethodRef
+iMethodRef (IMethod cls mth ty) = G.IMethodRef (G.ClassRef cls) (G.NameType mth (G.Type (describeMethodType ty)))
 
 iFieldRef :: IField -> G.FieldRef
 iFieldRef (IField cls fld ty) = G.FieldRef (G.ClassRef cls) (G.NameType fld (G.Type (describeType ty)))
@@ -405,6 +414,13 @@ sFieldRef :: SField -> G.FieldRef
 sFieldRef (SField cls fld ty) = G.FieldRef (G.ClassRef cls) (G.NameType fld (G.Type (describeType ty)))
 
 ------------------------------------------------------------------------
+
+methodTypeOfFunType :: FunType -> MethodType
+methodTypeOfFunType ft@(FunType argTys outTys) = case outTys of
+    []    -> MethodType argTys Nothing
+    [typ] -> MethodType argTys (Just typ)
+    _     -> error $ "methodTypeOfFunType: multiple return "
+                  <> "values not supported: " <> show ft
 
 describeType :: Type -> Text
 describeType vtyp = case vtyp of
@@ -427,10 +443,10 @@ describeMethodType (MethodType args ret) = "(" <> args' <> ")" <> ret'
     ret'  = maybe "V" describeType ret
 
 mangleFunType :: FunType -> Text
-mangleFunType (FunType ins outs) = "G" <> mangle ins <> "$$" <> mangle outs
+mangleFunType (FunType args outs) = "G" <> mangle args <> "$$" <> mangle outs
   where
     mangle = T.replace "/" "_"
-           . T.replace ";" "_$"
+           . T.replace ";" "_"
            . T.replace "[" "A"
            . T.concat
            . map describeType

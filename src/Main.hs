@@ -72,14 +72,20 @@ foo1 =
     Let [y] (Copy [Num 1 F32]) $
     Let [w] (Copy [Num 42 F32]) $
     Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
+
     letrec [ (u, Lambda (FunType [] [NF32]) [] $
                     Let [z] (Copy [Var t]) $
                     Return (Copy [Num 42 F32]) )
+
            , (t, Lambda (FunType [NF32, NF32] [NF32]) [x, y] $
-                    Let [s] (Copy [Var u]) $
+                    Let [s] (Invoke (FunType [] [NF32]) (Var u) []) $
                     Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
-                    Return (InvokeBinary (Add F32) (Var w) (Var z))) ] $
-    Let [s] (InvokeStatic float2string [Var z]) $
+                    Let [w] (InvokeBinary (Add F32) (Var s) (Var z)) $
+                    Return (Copy [Var w])) ] $
+                    -- Return (InvokeStatic float2string [Var w])) ] $
+
+    Let [s] (Invoke (FunType [NF32, NF32] [NF32]) (Var t) [Var x, Var w]) $
+    Let [s] (InvokeStatic float2string [Var s]) $
     Let [out] (GetStatic sysOut) $
     Return (InvokeVirtual println (Var out) [Var s])
   where
@@ -113,8 +119,8 @@ float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JSt
 sysOut :: SField
 sysOut = SField  "java/lang/System" "out" (ObjTy "java/io/PrintStream")
 
-println :: IMethod
-println = IMethod "java/io/PrintStream" "println" (MethodType [ObjTy "java/lang/String"] Nothing)
+println :: VMethod
+println = VMethod "java/io/PrintStream" "println" (MethodType [ObjTy "java/lang/String"] Nothing)
 
 ------------------------------------------------------------------------
 

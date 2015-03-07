@@ -114,6 +114,11 @@ data MethodRef = MethodRef
     , mNameType :: NameType
     } deriving (Eq, Ord, Show, Read)
 
+data IMethodRef = IMethodRef
+    { imClass    :: ClassRef
+    , imNameType :: NameType
+    } deriving (Eq, Ord, Show, Read)
+
 data NameType = NameType
     { nName :: Text
     , nType :: Type
@@ -125,16 +130,17 @@ data NameType = NameType
 data ConstPool = ConstPool
     { cpNext      :: ConstRef
     , cpValues    :: [ConstVal]
-    , cpUtf8s     :: Map Text      ConstRef
-    , cpIntegers  :: Map Int32     ConstRef
-    , cpFloats    :: Map Float     ConstRef
-    , cpLongs     :: Map Int64     ConstRef
-    , cpDoubles   :: Map Double    ConstRef
-    , cpStrings   :: Map Text      ConstRef
-    , cpClasses   :: Map ClassRef  ConstRef
-    , cpFields    :: Map FieldRef  ConstRef
-    , cpMethods   :: Map MethodRef ConstRef
-    , cpNameTypes :: Map NameType  ConstRef
+    , cpUtf8s     :: Map Text       ConstRef
+    , cpIntegers  :: Map Int32      ConstRef
+    , cpFloats    :: Map Float      ConstRef
+    , cpLongs     :: Map Int64      ConstRef
+    , cpDoubles   :: Map Double     ConstRef
+    , cpStrings   :: Map Text       ConstRef
+    , cpClasses   :: Map ClassRef   ConstRef
+    , cpFields    :: Map FieldRef   ConstRef
+    , cpMethods   :: Map MethodRef  ConstRef
+    , cpIMethods  :: Map IMethodRef ConstRef
+    , cpNameTypes :: Map NameType   ConstRef
     } deriving (Eq, Ord, Show, Read)
 
 newtype ConstRef = ConstRef { unConstRef :: Word16 }
@@ -150,11 +156,13 @@ data ConstVal =
     | ConstClass    ConstRef
     | ConstField    ConstRef ConstRef
     | ConstMethod   ConstRef ConstRef
+    | ConstIMethod  ConstRef ConstRef
     | ConstNameType ConstRef ConstRef
     deriving (Eq, Ord, Show, Read)
 
 emptyConstPool :: ConstPool
 emptyConstPool = ConstPool (ConstRef 1) []
+    M.empty
     M.empty
     M.empty
     M.empty
@@ -236,10 +244,10 @@ data Instruction =
     | GetField  FieldRef
     | PutField  FieldRef
 
-    | InvokeVirtual   MethodRef
-    | InvokeSpecial   MethodRef
-    | InvokeStatic    MethodRef
-    | InvokeInterface MethodRef NumArgs
+    | InvokeVirtual    MethodRef
+    | InvokeSpecial    MethodRef
+    | InvokeStatic     MethodRef
+    | InvokeInterface IMethodRef NumArgs
 
     | New       ClassRef
     | CheckCast ClassRef
@@ -320,6 +328,11 @@ addMethodRef = addConst mk cpMethods (\cp m -> cp { cpMethods = m })
   where
     mk (MethodRef cls nt) = ConstMethod <$> addClassRef cls <*> addNameType nt
 
+addIMethodRef :: IMethodRef -> CP ConstRef
+addIMethodRef = addConst mk cpIMethods (\cp m -> cp { cpIMethods = m })
+  where
+    mk (IMethodRef cls nt) = ConstIMethod <$> addClassRef cls <*> addNameType nt
+
 addFieldRef :: FieldRef -> CP ConstRef
 addFieldRef = addConst mk cpFields (\cp m -> cp { cpFields = m })
   where
@@ -379,6 +392,7 @@ bConstPool ConstPool{..} = word16BE cpCount
     go (ConstClass ref)          = word8 7  <> bConstRef ref
     go (ConstField cref nref)    = word8 9  <> bConstRef cref <> bConstRef nref
     go (ConstMethod cref nref)   = word8 10 <> bConstRef cref <> bConstRef nref
+    go (ConstIMethod cref nref)  = word8 11 <> bConstRef cref <> bConstRef nref
     go (ConstNameType nref tref) = word8 12 <> bConstRef nref <> bConstRef tref
 
 bConstRef :: ConstRef -> Builder
@@ -706,10 +720,10 @@ bytecodeOfInstruction i = case i of
     GetStatic x -> B'GetStatic . unConstRef <$> addFieldRef x
     PutStatic x -> B'PutStatic . unConstRef <$> addFieldRef x
 
-    InvokeVirtual   x   -> B'InvokeVirtual   . unConstRef <$> addMethodRef x
-    InvokeSpecial   x   -> B'InvokeSpecial   . unConstRef <$> addMethodRef x
-    InvokeStatic    x   -> B'InvokeStatic    . unConstRef <$> addMethodRef x
-    InvokeInterface x n -> B'InvokeInterface . unConstRef <$> addMethodRef x <*> pure n
+    InvokeVirtual   x   -> B'InvokeVirtual   . unConstRef <$> addMethodRef  x
+    InvokeSpecial   x   -> B'InvokeSpecial   . unConstRef <$> addMethodRef  x
+    InvokeStatic    x   -> B'InvokeStatic    . unConstRef <$> addMethodRef  x
+    InvokeInterface x n -> B'InvokeInterface . unConstRef <$> addIMethodRef x <*> pure n
 
     New       x -> B'New       . unConstRef <$> addClassRef x
     CheckCast x -> B'CheckCast . unConstRef <$> addClassRef x

@@ -489,7 +489,7 @@ bytecode bc = case bc of
     B'InvokeVirtual   x   -> word8 0xb6 <> word16BE x
     B'InvokeSpecial   x   -> word8 0xb7 <> word16BE x
     B'InvokeStatic    x   -> word8 0xb8 <> word16BE x
-    B'InvokeInterface x y -> word8 0xb9 <> word16BE x <> word8 y
+    B'InvokeInterface x y -> word8 0xb9 <> word16BE x <> word8 y <> word8 0x0
     B'InvokeDynamic   x   -> word8 0xba <> word16BE x
     B'New       x         -> word8 0xbb <> word16BE x
     B'NewArray  t         -> word8 0xbc <> word8 t

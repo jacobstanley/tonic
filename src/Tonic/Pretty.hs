@@ -42,8 +42,8 @@ ppTail tl = case tl of
     InvokeUnary   o x    -> ppUnaryOp o <> ppAtom x
     InvokeBinary  o x y  -> ppAtom x <+> ppBinaryOp o <+> ppAtom y
     InvokeStatic  m   xs -> kw "invokestatic"  <+> ppSMethod m <+> ppAtoms xs
-    InvokeVirtual m i xs -> kw "invokevirtual" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
-    InvokeSpecial m i xs -> kw "invokespecial" <+> ppIMethod m <+> ppAtom i <+> ppAtoms xs
+    InvokeVirtual m i xs -> kw "invokevirtual" <+> ppVMethod m <+> ppAtom i <+> ppAtoms xs
+    InvokeSpecial m i xs -> kw "invokespecial" <+> ppVMethod m <+> ppAtom i <+> ppAtoms xs
     GetField      f i    -> kw "getfield"      <+> ppIField  f <+> ppAtom i
     PutField      f i x  -> kw "putfield"      <+> ppIField  f <+> ppAtom i <+> op "<-" <+> ppAtom x
     GetStatic     f      -> kw "getstatic"     <+> ppSField  f
@@ -105,8 +105,8 @@ ppConstructor (Constructor cls _) = yellow $ text (T.unpack cls)
 ppSMethod :: SMethod -> Doc
 ppSMethod (SMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
 
-ppIMethod :: IMethod -> Doc
-ppIMethod (IMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
+ppVMethod :: VMethod -> Doc
+ppVMethod (VMethod cls mth _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack mth)
 
 ppSField :: SField -> Doc
 ppSField (SField cls fld _) = yellow $ text (T.unpack cls) <> dot <> text (T.unpack fld)
