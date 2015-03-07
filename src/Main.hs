@@ -46,7 +46,7 @@ main = do
     --let (cls, clss) = closureOfBinding (M.fromList [("x", NumTy F32)]) "f" lam
     --mapM_ (writeClass "output") (cls:clss)
 
-    writeMain foo1
+    writeMain (rename foo1)
 
 ------------------------------------------------------------------------
 
@@ -71,9 +71,14 @@ foo1 =
     Let [x] (Copy [Num 9 F32]) $
     Let [y] (Copy [Num 1 F32]) $
     Let [w] (Copy [Num 42 F32]) $
-    letrec [ (u, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 42 F32])))
-           , (t, Lambda (FunType [] [NF32]) [] (Return (Copy [Num 1 F32]))) ] $
     Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
+    letrec [ (u, Lambda (FunType [] [NF32]) [] $
+                    Let [z] (Copy [Var t]) $
+                    Return (Copy [Num 42 F32]) )
+           , (t, Lambda (FunType [NF32, NF32] [NF32]) [x, y] $
+                    Let [s] (Copy [Var u]) $
+                    Let [z] (InvokeBinary (Add F32) (Var x) (Var y)) $
+                    Return (InvokeBinary (Add F32) (Var w) (Var z))) ] $
     Let [s] (InvokeStatic float2string [Var z]) $
     Let [out] (GetStatic sysOut) $
     Return (InvokeVirtual println (Var out) [Var s])

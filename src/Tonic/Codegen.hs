@@ -4,12 +4,13 @@
 module Tonic.Codegen where
 
 import           Control.Arrow (first)
+import           Data.List (zipWith3)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Set (Set)
-import qualified Data.Set as S
 import           Data.Maybe (maybeToList)
 import           Data.Monoid ((<>))
+import           Data.Set (Set)
+import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
 
@@ -23,77 +24,6 @@ import           Tonic.Utils
 
 data Local = L G.VarIndex Type
     deriving (Eq, Ord, Show)
-
-------------------------------------------------------------------------
-
-interfacesOfBinding :: Binding n -> Set G.Class
-interfacesOfBinding (Const  _   x) = interfacesOfTerm x
-interfacesOfBinding (Lambda t _ x) = interfacesOfTerm x `S.union` S.singleton iface
-  where
-    iface = (mkInterface $ mangleFunType t) {
-              G.cMethods = [G.Method acc "invoke" mtyp Nothing]
-            }
-
-    acc  = [G.M'Public, G.M'Abstract]
-    mtyp = G.Type (describeMethodType (methodTypeOfFunType t))
-
-interfacesOfTerm :: Term n -> Set G.Class
-interfacesOfTerm term = case term of
-    Return    _ -> S.empty
-    Iff   _ t e -> interfacesOfTerm t <> interfacesOfTerm e
-    Let   _ _ x -> interfacesOfTerm x
-    LetRec bs x -> S.unions (map interfacesOfBinding (M.elems bs)) <> interfacesOfTerm x
-
-------------------------------------------------------------------------
-
-closureOfBinding :: (Ord n, Show n) => Map n Type -> ClassName -> Binding n -> (G.Class, [G.Class])
-closureOfBinding scopeTys name (Lambda ftyp@(FunType argTys outTys) argNs term) = (cls, clss)
-  where
-    flds   = M.toList (scopeTys `mapIntersectionS` fvOfTerm term)
-    fldNs  = map fst flds
-    fldTys = map snd flds
-
-    vars0  = [1..]
-    vars1 = drop (length argNs) vars0
-    vars2 = drop (length fldNs) vars1
-
-    argLocals = zipWith L vars0 argTys
-    fldLocals = zipWith L vars1 fldTys
-
-    env = M.fromList (argNs `zip` argLocals) `mapUnionR`
-          M.fromList (fldNs `zip` fldLocals)
-
-    (code, clss) = codeOfTerm vars2 env term'
-    term' = foldr (.) id (map assignField flds) term
-
-    assignField (n, t) =
-        Let [n] (GetField fld (Num 1 (Fmt A 0)))
-      where
-        fld = IField clsName (fieldName n) t
-
-    cls = addFields flds
-        . addInterface (mangleFunType ftyp)
-        . addMethod "invoke" (methodTypeOfFunType ftyp) (G.Code 8 code)
-        . addEmptyConstructor
-        $ mkClass clsName
-
-    clsName = "C$" <> name
-
-methodTypeOfFunType :: FunType -> MethodType
-methodTypeOfFunType ft@(FunType argTys outTys) = case outTys of
-    []    -> MethodType argTys Nothing
-    [typ] -> MethodType argTys (Just typ)
-    _     -> error $ "methodTypeOfFunType: multiple return "
-                  <> "values not supported: " <> show ft
-
-addFields :: Show n => [(n, Type)] -> G.Class -> G.Class
-addFields = foldr (.) id . map (uncurry addField)
-
-addField :: Show n => n -> Type -> G.Class -> G.Class
-addField n t = addFieldWith [G.F'Private] (fieldName n) t
-
-fieldName :: Show n => n -> FieldName
-fieldName n = "_" <> T.replace "\"" "" (T.pack (show n))
 
 ------------------------------------------------------------------------
 
@@ -140,29 +70,132 @@ codeOfTerm vars env term = case term of
 
 
 codeOfLetRec :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Bindings n -> Term n -> ([G.Instruction], [G.Class])
-codeOfLetRec vars env bs term = (code0 <> code1, clss0 <> clss1)
+codeOfLetRec vars env bs term = (code0 <> code1, concat clsss0 <> clss1)
   where
-    (vars', ls) = allocLocals vars (map typeOfBinding (M.elems bs))
-    env'        = env `mapUnionR` M.fromList (M.keys bs `zip` ls)
-    code0       = concat $ zipWith (\xs y -> xs ++ [y])
-                                   (map (codeOfTail env) news)
-                                   (map iStore ls)
+    bindingNames = M.keys bs
+    bindings     = M.elems bs
 
-    news = map new (M.toList bs)
-    new (n, b) = New (ctor n) []
+    (vars', locals) = allocLocals vars (map typeOfBinding bindings)
+    env'            = env `mapUnionR` M.fromList (bindingNames `zip` locals)
 
-    className = T.replace "\"" "" . T.pack . show
-    ctor n    = Constructor ("C$" <> className n) (MethodType [] Nothing)
+    scopeTys        = M.map typeOfLocal env `mapUnionR` M.map typeOfBinding bs
+    (fldss, clsss0) = unzip (map (closureOfBinding scopeTys . first className) (M.toList bs))
 
-    scopeTys  = M.map typeOfLocal env `mapUnionR` M.map typeOfBinding bs
-    closure   = uncurry (:) . uncurry (closureOfBinding scopeTys)
-    clss0     = concatMap (closure . first className) (M.toList bs)
+    code0 = concat (zipWith  new        bindingNames locals)
+         <> concat (zipWith3 initFields bindingNames locals fldss)
+
+    new n l = [ G.New (G.ClassRef (className n))
+              , G.Dup
+              , G.InvokeSpecial (ctorRef n)
+              , iStore l ]
+
+    initFields n l flds = [ iLoad l ]
+                       <> map (nLoad . fst) flds
+                       <> [ G.InvokeVirtual (initRef n (map snd flds)) ]
+
+    ctorRef n    = iMethodRef (IMethod (className n) "<init>" (MethodType [] Nothing))
+    initRef n ts = iMethodRef (IMethod (className n)  "init"  (MethodType ts Nothing))
+
+    nLoad n = iLoad (unsafeLookup "codeOfLetRec" n env')
 
     (code1, clss1) = codeOfTerm vars' env' term
 
+    className n = "C$" <> T.replace "\"" "" (T.pack (show n))
 
 allocLocals :: [G.VarIndex] -> [Type] -> ([G.VarIndex], [Local])
 allocLocals vs ts = (drop (length ts) vs, zipWith L vs ts)
+
+------------------------------------------------------------------------
+
+closureOfBinding :: (Ord n, Show n) => Map n Type -> (ClassName, Binding n) -> ([(n, Type)], [G.Class])
+closureOfBinding scopeTys (clsName, Lambda ftyp@(FunType argTys outTys) argNs term) = (flds, cls : clss)
+  where
+    flds   = M.toList (scopeTys `mapIntersectionS` fvOfTerm term)
+    fldNs  = map fst flds
+    fldTys = map snd flds
+
+    assignments = fldNs `zip` map ifld flds
+    ifld (n, t) = IField clsName (fieldName n) t
+
+    vars0  = [1..]
+    vars1 = drop (length argNs) vars0
+
+    argLocals = zipWith L vars0 argTys
+
+    env = M.fromList (argNs `zip` argLocals)
+
+    (code, clss) = codeOfTerm vars1 env term'
+    term' = foldr (.) id (map assignField assignments) term
+
+    assignField (n, f) = Let [n] (GetField f (Num 1 (Fmt A 0)))
+
+    cls = addFields flds
+        . addInterface (mangleFunType ftyp)
+        . addMethod "invoke" (methodTypeOfFunType ftyp) (G.Code 8 code)
+        . addInitMethod flds
+        . addEmptyCtor
+        $ mkClass clsName
+
+methodTypeOfFunType :: FunType -> MethodType
+methodTypeOfFunType ft@(FunType argTys outTys) = case outTys of
+    []    -> MethodType argTys Nothing
+    [typ] -> MethodType argTys (Just typ)
+    _     -> error $ "methodTypeOfFunType: multiple return "
+                  <> "values not supported: " <> show ft
+
+addFields :: Show n => [(n, Type)] -> G.Class -> G.Class
+addFields = foldr (.) id . map (uncurry addField)
+
+addField :: Show n => n -> Type -> G.Class -> G.Class
+addField n t = addFieldWith [G.F'Private, G.F'Final] (fieldName n) t
+--addField n t = addFieldWith [G.F'Public] (fieldName n) t
+
+fieldName :: Show n => n -> FieldName
+fieldName n = "_" <> T.replace "\"" "" (T.pack (show n))
+
+addInitMethod :: Show n => [(n, Type)] -> G.Class -> G.Class
+addInitMethod flds cls =
+    addMethodWith [G.M'Public, G.M'Final] "init"
+                  (MethodType (map snd flds) Nothing)
+                  (G.Code 8 code) cls
+  where
+    code = concat (zipWith putField [1..] flds) <> [G.Return]
+
+    putField i (n, t) = [ G.ALoad 0
+                        , iLoad (L i t)
+                        , G.PutField (fldRef n t) ]
+
+    fldRef n t = iFieldRef (IField clsName (fieldName n) t)
+    clsName    = G.unClassRef (G.cName cls)
+
+addEmptyCtor :: G.Class -> G.Class
+addEmptyCtor cls =
+    addMethodWith [G.M'Public] "<init>"
+                  (MethodType [] Nothing)
+                  (G.Code 8 code) cls
+  where
+    code = [G.ALoad 0, G.InvokeSpecial (iMethodRef objInit), G.Return]
+    objInit = IMethod "java/lang/Object" "<init>" (MethodType [] Nothing)
+
+------------------------------------------------------------------------
+
+interfacesOfBinding :: Binding n -> Set G.Class
+interfacesOfBinding (Const  _   x) = interfacesOfTerm x
+interfacesOfBinding (Lambda t _ x) = interfacesOfTerm x `S.union` S.singleton iface
+  where
+    iface = (mkInterface $ mangleFunType t) {
+              G.cMethods = [G.Method acc "invoke" mtyp Nothing]
+            }
+
+    acc  = [G.M'Public, G.M'Abstract]
+    mtyp = G.Type (describeMethodType (methodTypeOfFunType t))
+
+interfacesOfTerm :: Term n -> Set G.Class
+interfacesOfTerm term = case term of
+    Return    _ -> S.empty
+    Iff   _ t e -> interfacesOfTerm t <> interfacesOfTerm e
+    Let   _ _ x -> interfacesOfTerm x
+    LetRec bs x -> S.unions (map interfacesOfBinding (M.elems bs)) <> interfacesOfTerm x
 
 ------------------------------------------------------------------------
 
@@ -268,16 +301,6 @@ mkInterface name = (mkClass name) { G.cAccess = [ G.C'Public, G.C'Interface, G.C
 
 addInterface :: ClassName -> G.Class -> G.Class
 addInterface name cls = cls { G.cInterfaces = G.cInterfaces cls ++ [G.ClassRef name] }
-
-addEmptyConstructor :: G.Class -> G.Class
-addEmptyConstructor =
-    addMethodWith [G.M'Public] "<init>" (MethodType [] Nothing) (G.Code 8 code)
-  where
-    code = [ G.ALoad 0
-           , G.InvokeSpecial (cMethodRef ctor)
-           , G.Return ]
-
-    ctor = Constructor "java/lang/Object" (MethodType [] Nothing)
 
 addMethod :: MethodName -> MethodType -> G.Code -> G.Class -> G.Class
 addMethod = addMethodWith [G.M'Public, G.M'Final]
