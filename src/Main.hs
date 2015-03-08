@@ -46,12 +46,16 @@ main = do
     --let (cls, clss) = closureOfBinding (M.fromList [("x", NumTy F32)]) "f" lam
     --mapM_ (writeClass "output") (cls:clss)
 
-    writeMain (rename foo1)
+    writeMain (rename oddeven)
 
 ------------------------------------------------------------------------
 
 pattern F32     = Fmt F 32
-pattern NF32    = NumTy (Fmt F 32)
+pattern I32     = Fmt I 32
+pattern U1      = Fmt U 1
+pattern NF32    = NumTy F32
+pattern NI32    = NumTy I32
+pattern NU1     = NumTy U1
 pattern JString = ObjTy "java/lang/String"
 
 foo0 :: Term String
@@ -110,6 +114,31 @@ foo2 =
     f2f  = FunType [NF32]       [NF32]
     _2f  = FunType []           [NF32]
     f2s  = FunType [NF32]       [JString]
+
+    letrec bs t = LetRec (M.fromList bs) t
+
+oddeven :: Term String
+oddeven =
+    letrec [ ("odd", Lambda i2b ["x"] $
+                        Let ["b"] (InvokeBinary (Ceq I32) (Var "x") zero) $
+                        Iff (Var "b") (Return (Copy [false])) $
+                        Let ["y"] (InvokeBinary (Sub I32) (Var "x") one) $
+                        Return (Invoke i2b (Var "even") [Var "y"]))
+
+           , ("even", Lambda i2b ["x"] $
+                        Let ["b"] (InvokeBinary (Ceq I32) (Var "x") zero) $
+                        Iff (Var "b") (Return (Copy [true])) $
+                        Let ["y"] (InvokeBinary (Sub I32) (Var "x") one) $
+                        Return (Invoke i2b (Var "odd") [Var "y"])) ] $
+
+    Return (Invoke i2b (Var "odd") [Num 19 I32])
+  where
+    zero  = Num 0 I32
+    one   = Num 1 I32
+    false = Num 0 U1
+    true  = Num 1 U1
+
+    i2b  = FunType [NI32] [NU1]
 
     letrec bs t = LetRec (M.fromList bs) t
 

@@ -52,29 +52,27 @@ ppTail tl = case tl of
 
 ppBinding :: Pretty n => Binding n -> Doc
 ppBinding binding = case binding of
-    Lambda _ ns x -> op "\\" <> ppNames ns <+> op "->" <+> ppTerm x
-    Const  _    x -> ppTerm x
+    Lambda _ ns x -> op "\\" <> ppNames ns <+> op "->" <+> align (ppTerm x)
+    Const  _    x -> align (ppTerm x)
 
 ppBindings :: Pretty n => Map n (Binding n) -> Doc
 ppBindings bs | M.null bs = tuple []
               | otherwise = align . vcat . map go $ M.toList bs
   where
-    go (n, b) = ppNames [n] <+> op "=" <+> align (ppBinding b)
+    go (n, b) = ppNames [n] <+> op "=" <+> ppBinding b
 
 ppTerm :: Pretty n => Term n -> Doc
 ppTerm term = case term of
     Return x    -> ppTail x
 
-    Iff i t e   -> kw "if" <+> ppAtom i </> kw "then" <+> ppTerm t
-                                        </> kw "else" <+> ppTerm e
+    Iff i t e   -> kw "if" <+> ppAtom i <$> kw "then" <+> align (ppTerm t)
+                                        <$> kw "else" <+> align (ppTerm e)
 
     Let ns x y  -> kw "let" <+> ppNames ns
                             <+> op "=" <+> align (ppTail x)
-                            <+> kw "in"
                             <$> ppTerm y
 
     LetRec bs x -> kw "letrec" <+> ppBindings bs
-                               <+> kw "in"
                                <$> ppTerm x
 
 ------------------------------------------------------------------------
@@ -89,6 +87,7 @@ ppBinaryOp o = case o of
     Sub f -> op "-" <> dullred (ppFormat f)
     Mul f -> op "*" <> dullred (ppFormat f)
     Div f -> op "/" <> dullred (ppFormat f)
+    Ceq f -> op "==" <> dullred (ppFormat f)
     _     -> error "ppBinaryOp"
 
 ppFormat :: Format -> Doc
