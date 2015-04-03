@@ -1,6 +1,7 @@
 module JVM.Bytecode
     ( Bytecode(..)
-    , bytecode
+    , bBytecode
+    , sizeOfBytecode
     ) where
 
 import Data.ByteString.Builder
@@ -302,8 +303,8 @@ data Bytecode =
 
 ------------------------------------------------------------------------
 
-bytecode :: Bytecode -> Builder
-bytecode bc = case bc of
+bBytecode :: Bytecode -> Builder
+bBytecode bc = case bc of
     B'NOp                 -> word8 0x00
     B'AConst_null         -> word8 0x01
     B'IConst_m1           -> word8 0x02
@@ -474,8 +475,8 @@ bytecode bc = case bc of
     B'Goto x              -> word8 0xa7 <> int16BE x
     B'JSr  x              -> word8 0xa8 <> int16BE x
     B'Ret  x              -> word8 0xa9 <> word8 x
-    B'TableSwitch         -> error "JVM.Bytecode.bytecode: not implemented 0xaa"
-    B'LookupSwitch        -> error "JVM.Bytecode.bytecode: not implemented 0xab"
+    B'TableSwitch         -> error "JVM.Bytecode.bBytecode: not implemented 0xaa"
+    B'LookupSwitch        -> error "JVM.Bytecode.bBytecode: not implemented 0xab"
     B'IReturn             -> word8 0xac
     B'LReturn             -> word8 0xad
     B'FReturn             -> word8 0xae
@@ -517,3 +518,221 @@ bytecode bc = case bc of
     B'IfNonNull x         -> word8 0xc7 <> int16BE x
     B'Goto_W x            -> word8 0xc8 <> int32BE x
     B'JSr_W  x            -> word8 0xc9 <> int32BE x
+
+------------------------------------------------------------------------
+
+sizeOfBytecode :: Bytecode -> Int
+sizeOfBytecode bc = case bc of
+    B'NOp                 -> 1
+    B'AConst_null         -> 1
+    B'IConst_m1           -> 1
+    B'IConst_0            -> 1
+    B'IConst_1            -> 1
+    B'IConst_2            -> 1
+    B'IConst_3            -> 1
+    B'IConst_4            -> 1
+    B'IConst_5            -> 1
+    B'LConst_0            -> 1
+    B'LConst_1            -> 1
+    B'FConst_0            -> 1
+    B'FConst_1            -> 1
+    B'FConst_2            -> 1
+    B'DConst_0            -> 1
+    B'DConst_1            -> 1
+    B'BIPush _            -> 2
+    B'SIPush _            -> 3
+    B'LdC _               -> 2
+    B'LdC_W _             -> 3
+    B'LdC2_W _            -> 3
+    B'ILoad _             -> 2
+    B'LLoad _             -> 2
+    B'FLoad _             -> 2
+    B'DLoad _             -> 2
+    B'ALoad _             -> 2
+    B'ILoad_0             -> 1
+    B'ILoad_1             -> 1
+    B'ILoad_2             -> 1
+    B'ILoad_3             -> 1
+    B'LLoad_0             -> 1
+    B'LLoad_1             -> 1
+    B'LLoad_2             -> 1
+    B'LLoad_3             -> 1
+    B'FLoad_0             -> 1
+    B'FLoad_1             -> 1
+    B'FLoad_2             -> 1
+    B'FLoad_3             -> 1
+    B'DLoad_0             -> 1
+    B'DLoad_1             -> 1
+    B'DLoad_2             -> 1
+    B'DLoad_3             -> 1
+    B'ALoad_0             -> 1
+    B'ALoad_1             -> 1
+    B'ALoad_2             -> 1
+    B'ALoad_3             -> 1
+    B'IALoad              -> 1
+    B'LALoad              -> 1
+    B'FALoad              -> 1
+    B'DALoad              -> 1
+    B'AALoad              -> 1
+    B'BALoad              -> 1
+    B'CALoad              -> 1
+    B'SALoad              -> 1
+    B'IStore _            -> 2
+    B'LStore _            -> 2
+    B'FStore _            -> 2
+    B'DStore _            -> 2
+    B'AStore _            -> 2
+    B'IStore_0            -> 1
+    B'IStore_1            -> 1
+    B'IStore_2            -> 1
+    B'IStore_3            -> 1
+    B'LStore_0            -> 1
+    B'LStore_1            -> 1
+    B'LStore_2            -> 1
+    B'LStore_3            -> 1
+    B'FStore_0            -> 1
+    B'FStore_1            -> 1
+    B'FStore_2            -> 1
+    B'FStore_3            -> 1
+    B'DStore_0            -> 1
+    B'DStore_1            -> 1
+    B'DStore_2            -> 1
+    B'DStore_3            -> 1
+    B'AStore_0            -> 1
+    B'AStore_1            -> 1
+    B'AStore_2            -> 1
+    B'AStore_3            -> 1
+    B'IAStore             -> 1
+    B'LAStore             -> 1
+    B'FAStore             -> 1
+    B'DAStore             -> 1
+    B'AAStore             -> 1
+    B'BAStore             -> 1
+    B'CAStore             -> 1
+    B'SAStore             -> 1
+    B'Pop                 -> 1
+    B'Pop2                -> 1
+    B'Dup                 -> 1
+    B'Dup_x1              -> 1
+    B'Dup_x2              -> 1
+    B'Dup2                -> 1
+    B'Dup2_x1             -> 1
+    B'Dup2_x2             -> 1
+    B'Swap                -> 1
+    B'IAdd                -> 1
+    B'LAdd                -> 1
+    B'FAdd                -> 1
+    B'DAdd                -> 1
+    B'ISub                -> 1
+    B'LSub                -> 1
+    B'FSub                -> 1
+    B'DSub                -> 1
+    B'IMul                -> 1
+    B'LMul                -> 1
+    B'FMul                -> 1
+    B'DMul                -> 1
+    B'IDiv                -> 1
+    B'LDiv                -> 1
+    B'FDiv                -> 1
+    B'DDiv                -> 1
+    B'IRem                -> 1
+    B'LRem                -> 1
+    B'FRem                -> 1
+    B'DRem                -> 1
+    B'INeg                -> 1
+    B'LNeg                -> 1
+    B'FNeg                -> 1
+    B'DNeg                -> 1
+    B'IShl                -> 1
+    B'LShl                -> 1
+    B'IShr                -> 1
+    B'LShr                -> 1
+    B'IUShr               -> 1
+    B'LUShr               -> 1
+    B'IAnd                -> 1
+    B'LAnd                -> 1
+    B'IOr                 -> 1
+    B'LOr                 -> 1
+    B'IXor                -> 1
+    B'LXor                -> 1
+    B'IInc _ _            -> 3
+    B'I2L                 -> 1
+    B'I2F                 -> 1
+    B'I2D                 -> 1
+    B'L2I                 -> 1
+    B'L2F                 -> 1
+    B'L2D                 -> 1
+    B'F2I                 -> 1
+    B'F2L                 -> 1
+    B'F2D                 -> 1
+    B'D2I                 -> 1
+    B'D2L                 -> 1
+    B'D2F                 -> 1
+    B'I2B                 -> 1
+    B'I2C                 -> 1
+    B'I2S                 -> 1
+    B'LCmp                -> 1
+    B'FCmpL               -> 1
+    B'FCmpG               -> 1
+    B'DCmpL               -> 1
+    B'DCmpG               -> 1
+    B'IfEq _              -> 3
+    B'IfNe _              -> 3
+    B'IfLt _              -> 3
+    B'IfGe _              -> 3
+    B'IfGt _              -> 3
+    B'IfLe _              -> 3
+    B'If_ICmpEq _         -> 3
+    B'If_ICmpNe _         -> 3
+    B'If_ICmpLt _         -> 3
+    B'If_ICmpGe _         -> 3
+    B'If_ICmpGt _         -> 3
+    B'If_ICmpLe _         -> 3
+    B'If_ACmpEq _         -> 3
+    B'If_ACmpNe _         -> 3
+    B'Goto _              -> 3
+    B'JSr  _              -> 3
+    B'Ret  _              -> 2
+    B'TableSwitch         -> error "JVM.Bytecode.sizeOfBytecode: not implemented 0xaa"
+    B'LookupSwitch        -> error "JVM.Bytecode.sizeOfBytecode: not implemented 0xab"
+    B'IReturn             -> 1
+    B'LReturn             -> 1
+    B'FReturn             -> 1
+    B'DReturn             -> 1
+    B'AReturn             -> 1
+    B'Return              -> 1
+    B'GetStatic _         -> 3
+    B'PutStatic _         -> 3
+    B'GetField  _         -> 3
+    B'PutField  _         -> 3
+    B'InvokeVirtual   _   -> 3
+    B'InvokeSpecial   _   -> 3
+    B'InvokeStatic    _   -> 3
+    B'InvokeInterface _ _ -> 5
+    B'InvokeDynamic   _   -> 3
+    B'New       _         -> 3
+    B'NewArray  _         -> 2
+    B'ANewArray _         -> 3
+    B'ArrayLength         -> 1
+    B'AThrow              -> 1
+    B'CheckCast  _        -> 3
+    B'InstanceOf _        -> 3
+    B'MonitorEnter        -> 1
+    B'MonitorExit         -> 1
+    B'ILoad_W _           -> 4
+    B'LLoad_W _           -> 4
+    B'FLoad_W _           -> 4
+    B'DLoad_W _           -> 4
+    B'ALoad_W _           -> 4
+    B'IStore_W _          -> 4
+    B'LStore_W _          -> 4
+    B'FStore_W _          -> 4
+    B'DStore_W _          -> 4
+    B'AStore_W _          -> 4
+    B'IInc_W _ _          -> 6
+    B'Ret_W _             -> 4
+    B'MultiANewArray _ _  -> 4
+    B'IfNull    _         -> 3
+    B'IfNonNull _         -> 3
+    B'Goto_W _            -> 5
+    B'JSr_W  _            -> 5

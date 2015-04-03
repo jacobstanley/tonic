@@ -34,7 +34,7 @@ codeOfTail env tl = case tl of
                          <> [G.InvokeInterface (fMethodRef ft) (fromIntegral (length xs + 1))]
 
     InvokeUnary  op x    -> [iPush env x, iUnary op]
-    InvokeBinary op x y  -> [iPush env x, iPush env y, iBinary op]
+    InvokeBinary op x y  -> [iPush env x, iPush env y] <> iBinary op
     InvokeVirtual m i xs -> map (iPush env) (i:xs) <> [G.InvokeVirtual (vMethodRef m)]
     InvokeSpecial m i xs -> map (iPush env) (i:xs) <> [G.InvokeSpecial (vMethodRef m)]
     InvokeStatic  m   xs -> map (iPush env) xs     <> [G.InvokeStatic  (sMethodRef m)]
@@ -47,7 +47,7 @@ codeOfTail env tl = case tl of
                          <> map (iPush env) xs
                          <> [G.InvokeSpecial (cMethodRef c)]
 
-codeOfTerm :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Term n -> ([G.Instruction], [G.Class])
+codeOfTerm :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Term n -> ([G.Instruction], [G.Class], [G.VarIndex])
 codeOfTerm vars env term = case term of
     Return x    -> let code0 = codeOfTail env x
                        code1 = case typesOfTail env x of
@@ -56,31 +56,38 @@ codeOfTerm vars env term = case term of
                          _     -> error $ "codeOfTerm: multiple return "
                                        <> "values not supported: " <> show x
                    in
-                       (code0 <> code1, [])
+                       (code0 <> code1, [], vars)
 
     Let ns x y  -> let code0       = codeOfTail env  x
 
-                       (vars', ls) = allocLocals vars (typesOfTail env x)
-                       env'        = env `mapUnionR` M.fromList (ns `zip` ls)
+                       (vars1, ls) = allocLocals vars (typesOfTail env x)
+                       env1        = env `mapUnionR` M.fromList (ns `zip` ls)
                        code1       = map iStore ls
 
-                       (code2, cs) = codeOfTerm vars' env' y
+                       (code2, cs, vars2) = codeOfTerm vars1 env1 y
                    in
-                       (code0 <> code1 <> code2, cs)
+                       (code0 <> code1 <> code2, cs, vars2)
 
     LetRec bs x -> codeOfLetRec vars env bs x
 
-    _ -> error ("codeOfTerm: unsupported: " <> show term)
+    Iff i t e   -> let (thenCode, tcs, vars1) = codeOfTerm vars env t
+                       (elseCode, ecs, vars2) = codeOfTerm vars env e
+                       -- (elseCode, ecs, vars2) = codeOfTerm vars1 env e
+
+                       ifCode = [iPush env i, G.IfEq (length thenCode)]
+                   in
+                       (ifCode <> thenCode <> elseCode, tcs <> ecs, vars2)
 
 
-codeOfLetRec :: (Ord n, Show n) => [G.VarIndex] -> Map n Local -> Bindings n -> Term n -> ([G.Instruction], [G.Class])
-codeOfLetRec vars env bs term = (code0 <> code1, concat clsss0 <> clss1)
+codeOfLetRec :: (Ord n, Show n)
+             => [G.VarIndex] -> Map n Local -> Bindings n -> Term n -> ([G.Instruction], [G.Class], [G.VarIndex])
+codeOfLetRec vars env bs term = (code0 <> code1, concat clsss0 <> clss1, vars2)
   where
     bindingNames = M.keys bs
     bindings     = M.elems bs
 
-    (vars', locals) = allocLocals vars (map typeOfBinding bindings)
-    env'            = env `mapUnionR` M.fromList (bindingNames `zip` locals)
+    (vars1, locals) = allocLocals vars (map typeOfBinding bindings)
+    env1            = env `mapUnionR` M.fromList (bindingNames `zip` locals)
 
     scopeTys        = M.map typeOfLocal env `mapUnionR` M.map typeOfBinding bs
     (fldss, clsss0) = unzip (map (closureOfBinding scopeTys . first className) (M.toList bs))
@@ -100,9 +107,9 @@ codeOfLetRec vars env bs term = (code0 <> code1, concat clsss0 <> clss1)
     ctorRef n    = vMethodRef (VMethod (className n) "<init>" (MethodType [] Nothing))
     initRef n ts = vMethodRef (VMethod (className n)  "init"  (MethodType ts Nothing))
 
-    nLoad n = iLoad (unsafeLookup "codeOfLetRec" n env')
+    nLoad n = iLoad (unsafeLookup "codeOfLetRec" n env1)
 
-    (code1, clss1) = codeOfTerm vars' env' term
+    (code1, clss1, vars2) = codeOfTerm vars1 env1 term
 
     className n = "C$" <> T.replace "\"" "" (T.pack (show n))
 
@@ -128,7 +135,7 @@ closureOfBinding scopeTys (clsName, Lambda ftyp@(FunType argTys outTys) argNs te
 
     env = M.fromList (argNs `zip` argLocals)
 
-    (code, clss) = codeOfTerm vars1 env term'
+    (code, clss, _) = codeOfTerm vars1 env term'
     term' = foldr (.) id (map assignField assignments) term
 
     assignField (n, f) = Let [n] (GetField f (Num 1 (Fmt A 0)))
@@ -204,32 +211,46 @@ iUnary op = case op of
 
     _ -> error ("iUnary: cannot invoke unary op: " <> show op)
 
-iBinary :: BinaryOp -> G.Instruction
+iBinary :: BinaryOp -> [G.Instruction]
 iBinary op = case op of
-    Add (Fmt I s) | s <= 32 -> G.IAdd
-                  | s <= 64 -> G.LAdd
-    Add (Fmt F s) | s <= 32 -> G.FAdd
-                  | s <= 64 -> G.DAdd
+    Add (Fmt I s) | s <= 32 -> [G.IAdd]
+                  | s <= 64 -> [G.LAdd]
+    Add (Fmt F s) | s <= 32 -> [G.FAdd]
+                  | s <= 64 -> [G.DAdd]
 
-    Sub (Fmt I s) | s <= 32 -> G.ISub
-                  | s <= 64 -> G.LSub
-    Sub (Fmt F s) | s <= 32 -> G.FSub
-                  | s <= 64 -> G.DSub
+    Sub (Fmt I s) | s <= 32 -> [G.ISub]
+                  | s <= 64 -> [G.LSub]
+    Sub (Fmt F s) | s <= 32 -> [G.FSub]
+                  | s <= 64 -> [G.DSub]
 
-    Mul (Fmt I s) | s <= 32 -> G.IMul
-                  | s <= 64 -> G.LMul
-    Mul (Fmt F s) | s <= 32 -> G.FMul
-                  | s <= 64 -> G.DMul
+    Mul (Fmt I s) | s <= 32 -> [G.IMul]
+                  | s <= 64 -> [G.LMul]
+    Mul (Fmt F s) | s <= 32 -> [G.FMul]
+                  | s <= 64 -> [G.DMul]
 
-    Div (Fmt I s) | s <= 32 -> G.IDiv
-                  | s <= 64 -> G.LDiv
-    Div (Fmt F s) | s <= 32 -> G.FDiv
-                  | s <= 64 -> G.DDiv
+    Div (Fmt I s) | s <= 32 -> [G.IDiv]
+                  | s <= 64 -> [G.LDiv]
+    Div (Fmt F s) | s <= 32 -> [G.FDiv]
+                  | s <= 64 -> [G.DDiv]
 
-    Rem (Fmt I s) | s <= 32 -> G.IRem
-                  | s <= 64 -> G.LRem
-    Rem (Fmt F s) | s <= 32 -> G.FRem
-                  | s <= 64 -> G.DRem
+    Rem (Fmt I s) | s <= 32 -> [G.IRem]
+                  | s <= 64 -> [G.LRem]
+    Rem (Fmt F s) | s <= 32 -> [G.FRem]
+                  | s <= 64 -> [G.DRem]
+
+    Ceq (Fmt I s) | s <= 32 -> [G.If_ICmpNe 2, G.IConst 1, G.Goto 1, G.IConst 0]
+    --Cne Format -- ^ not equal
+    --Clt Format -- ^ less than
+    --Cgt Format -- ^ greater than
+    --Cle Format -- ^ less or equal
+    --Cge Format -- ^ greater or equal
+
+    -- If_ICmpEq BranchOffset
+    -- If_ICmpNe BranchOffset
+    -- If_ICmpLt BranchOffset
+    -- If_ICmpGe BranchOffset
+    -- If_ICmpGt BranchOffset
+    -- If_ICmpLe BranchOffset
 
     _ -> error ("iBinary: cannot invoke binary op: " <> show op)
 
@@ -244,6 +265,8 @@ iPush env atom = case atom of
 iConst :: Rational -> Format -> G.Instruction
 iConst 0 (Fmt A _) = G.AConstNull
 iConst 1 (Fmt A _) = G.ALoad 0
+iConst 0 (Fmt U 1) = G.IConst 0 -- TODO handle unsigned numbers properly
+iConst 1 (Fmt U 1) = G.IConst 1
 iConst x fmt       = case fmt of
     Fmt I s | s <= 32 -> G.IConst (truncate x)
             | s <= 64 -> G.LConst (truncate x)
@@ -254,6 +277,8 @@ iConst x fmt       = case fmt of
 iLoad :: Local -> G.Instruction
 iLoad (L idx typ) = case formatOfType typ of
     Fmt A _           -> G.ALoad idx
+    Fmt U s | s <= 32 -> G.ILoad idx
+            | s <= 64 -> G.LLoad idx
     Fmt I s | s <= 32 -> G.ILoad idx
             | s <= 64 -> G.LLoad idx
     Fmt F s | s <= 32 -> G.FLoad idx
@@ -263,6 +288,8 @@ iLoad (L idx typ) = case formatOfType typ of
 iStore :: Local -> G.Instruction
 iStore (L idx typ) = case formatOfType typ of
     Fmt A _           -> G.AStore idx
+    Fmt U s | s <= 32 -> G.IStore idx
+            | s <= 64 -> G.LStore idx
     Fmt I s | s <= 32 -> G.IStore idx
             | s <= 64 -> G.LStore idx
     Fmt F s | s <= 32 -> G.FStore idx

@@ -176,8 +176,9 @@ emptyConstPool = ConstPool (ConstRef 1) []
 
 ------------------------------------------------------------------------
 
-type VarIndex = Word16
-type NumArgs  = Word8
+type VarIndex     = Word16
+type BranchOffset = Int
+type NumArgs      = Word8
 
 data Instruction =
       AConstNull
@@ -231,6 +232,31 @@ data Instruction =
     | LNeg
     | FNeg
     | DNeg
+
+    | LCmp
+    | FCmpL
+    | FCmpG
+    | DCmpL
+    | DCmpG
+
+    | IfEq BranchOffset
+    | IfNe BranchOffset
+    | IfLt BranchOffset
+    | IfGe BranchOffset
+    | IfGt BranchOffset
+    | IfLe BranchOffset
+
+    | If_ICmpEq BranchOffset
+    | If_ICmpNe BranchOffset
+    | If_ICmpLt BranchOffset
+    | If_ICmpGe BranchOffset
+    | If_ICmpGt BranchOffset
+    | If_ICmpLe BranchOffset
+
+    | If_ACmpEq BranchOffset
+    | If_ACmpNe BranchOffset
+
+    | Goto BranchOffset
 
     | IReturn
     | LReturn
@@ -523,8 +549,12 @@ bMethodAccess = word16BE . foldl1' (.|.) . map go
 
 bCode :: Code -> CP Builder
 bCode Code{..} = do
-    bcs <- mapM bytecodeOfInstruction cInstructions
-    let lbs = toLazyByteString . mconcat . map bytecode $ bcs
+    largest <- mapM largestBytecode cInstructions
+
+    let sized = zipperMap sizedBytecode (zip largest cInstructions)
+        final = zipperMap finalBytecode (zip sized   cInstructions)
+        lbs   = toLazyByteString . mconcat . map bBytecode $ final
+
     return $ word16BE cMaxStack
           <> word16BE (maxLocals + 1)
           <> word32BE (fromIntegral (L.length lbs))
@@ -552,8 +582,8 @@ varIndexOfInstruction i = case i of
 
 ------------------------------------------------------------------------
 
-bytecodeOfInstruction :: Instruction -> CP Bytecode
-bytecodeOfInstruction i = case i of
+largestBytecode :: Instruction -> CP Bytecode
+largestBytecode i = case i of
 
     -- Constants --
 
@@ -706,6 +736,35 @@ bytecodeOfInstruction i = case i of
     FNeg -> pure B'FNeg
     DNeg -> pure B'DNeg
 
+    -- Comparison --
+
+    LCmp  -> pure B'LCmp
+    FCmpL -> pure B'FCmpL
+    FCmpG -> pure B'FCmpG
+    DCmpL -> pure B'DCmpL
+    DCmpG -> pure B'DCmpG
+
+    -- Jumps --
+
+    IfEq _ -> pure (B'IfEq 0)
+    IfNe _ -> pure (B'IfNe 0)
+    IfLt _ -> pure (B'IfLt 0)
+    IfGe _ -> pure (B'IfGe 0)
+    IfGt _ -> pure (B'IfGt 0)
+    IfLe _ -> pure (B'IfLe 0)
+
+    If_ICmpEq _ -> pure (B'If_ICmpEq 0)
+    If_ICmpNe _ -> pure (B'If_ICmpNe 0)
+    If_ICmpLt _ -> pure (B'If_ICmpLt 0)
+    If_ICmpGe _ -> pure (B'If_ICmpGe 0)
+    If_ICmpGt _ -> pure (B'If_ICmpGt 0)
+    If_ICmpLe _ -> pure (B'If_ICmpLe 0)
+
+    If_ACmpEq _ -> pure (B'If_ACmpEq 0)
+    If_ACmpNe _ -> pure (B'If_ACmpNe 0)
+
+    Goto _ -> pure (B'Goto_W 0)
+
     -- Misc --
 
     IReturn -> pure B'IReturn
@@ -743,3 +802,62 @@ bytecodeOfInstruction i = case i of
 
     minI16 = fromIntegral (minBound :: Int16)
     maxI16 = fromIntegral (maxBound :: Int16)
+
+sizedBytecode :: [(Bytecode, Instruction)] -> (Bytecode, Instruction) -> [(Bytecode, Instruction)] -> Bytecode
+sizedBytecode ps x ns = case x of
+    (_, Goto n) | isWide n  -> B'Goto_W 0
+                | otherwise -> B'Goto   0
+
+    (bc, _) -> bc
+  where
+    isWide n = (n > 0 && nwide) || (n < 0 && pwide)
+      where
+        nwide = nsize > maxI16
+        pwide = psize < minI16
+
+        nsize =     takeSize (n+1) (map fst (x:ns))
+        psize = 0 - takeSize (-n)  (map fst ps)
+
+    minI16 = fromIntegral (minBound :: Int16)
+    maxI16 = fromIntegral (maxBound :: Int16)
+
+finalBytecode :: [(Bytecode, Instruction)] -> (Bytecode, Instruction) -> [(Bytecode, Instruction)] -> Bytecode
+finalBytecode ps x ns = case x of
+    (_, IfEq n) -> B'IfEq (offset16 n)
+    (_, IfNe n) -> B'IfNe (offset16 n)
+    (_, IfLt n) -> B'IfLt (offset16 n)
+    (_, IfGe n) -> B'IfGe (offset16 n)
+    (_, IfGt n) -> B'IfGt (offset16 n)
+    (_, IfLe n) -> B'IfLe (offset16 n)
+
+    (_, If_ICmpEq n) -> B'If_ICmpEq (offset16 n)
+    (_, If_ICmpNe n) -> B'If_ICmpNe (offset16 n)
+    (_, If_ICmpLt n) -> B'If_ICmpLt (offset16 n)
+    (_, If_ICmpGe n) -> B'If_ICmpGe (offset16 n)
+    (_, If_ICmpGt n) -> B'If_ICmpGt (offset16 n)
+    (_, If_ICmpLe n) -> B'If_ICmpLe (offset16 n)
+
+    (_, If_ACmpEq n) -> B'If_ACmpEq (offset16 n)
+    (_, If_ACmpNe n) -> B'If_ACmpNe (offset16 n)
+
+    (B'Goto _,   Goto n) -> B'Goto   (offset16 n)
+    (B'Goto_W _, Goto n) -> B'Goto_W (offset32 n)
+
+    (bc, _) -> bc
+  where
+    offset16 = fromIntegral . offset
+    offset32 = fromIntegral . offset
+
+    offset n | n >= 0    =     takeSize (n+1) (map fst (x:ns))
+             | otherwise = 0 - takeSize (-n)  (map fst ps)
+
+------------------------------------------------------------------------
+
+zipperMap :: ([a] -> a -> [a] -> b) -> [a] -> [b]
+zipperMap f xs = go [] xs
+  where
+    go _  []     = []
+    go ps (x:ns) = f ps x ns : go (x:ps) ns
+
+takeSize :: Int -> [Bytecode] -> Int
+takeSize n = sum . take n . map sizeOfBytecode

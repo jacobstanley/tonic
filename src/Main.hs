@@ -131,7 +131,9 @@ oddeven =
                         Let ["y"] (InvokeBinary (Sub I32) (Var "x") one) $
                         Return (Invoke i2b (Var "odd") [Var "y"])) ] $
 
-    Return (Invoke i2b (Var "odd") [Num 19 I32])
+    Let ["result"] (Invoke i2b (Var "odd") [Num 19 I32]) $
+    Iff (Var "result") (Let ["foo"] (Copy [Num 5.5 F32]) $ printTerm "19 is odd")
+                       (printTerm "19 is even")
   where
     zero  = Num 0 I32
     one   = Num 1 I32
@@ -141,6 +143,10 @@ oddeven =
     i2b  = FunType [NI32] [NU1]
 
     letrec bs t = LetRec (M.fromList bs) t
+
+    printTerm str =
+        Let ["out"] (GetStatic sysOut) $
+        Return (InvokeVirtual println (Var "out") [Str str])
 
 float2string :: SMethod
 float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JString))
@@ -159,7 +165,7 @@ writeMain term = do
     mapM_ (writeClass "output") (cls:clss ++ ifcs)
   where
     vars = [1..] -- start from 1 to skip (string[] args)
-    (code, clss) = codeOfTerm vars M.empty term
+    (code, clss, _) = codeOfTerm vars M.empty term
 
     ifcs = S.toList (interfacesOfTerm term)
 
