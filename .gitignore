@@ -1,4 +1,4 @@
 dist/
-examples/Jvmc.class
+output/
 *.swp
 *.jar
