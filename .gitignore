@@ -1,3 +1,4 @@
 dist/
 examples/Jvmc.class
 *.swp
+*.jar
