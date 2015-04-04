@@ -65,7 +65,7 @@ ppTerm :: Pretty n => Term n -> Doc
 ppTerm term = case term of
     Return x    -> ppTail x
 
-    Iff i t e   -> kw "if" <+> ppAtom i <$> kw "then" <+> align (ppTerm t)
+    If i t e    -> kw "if" <+> ppAtom i <$> kw "then" <+> align (ppTerm t)
                                         <$> kw "else" <+> align (ppTerm e)
 
     Let ns x y  -> kw "let" <+> ppNames ns

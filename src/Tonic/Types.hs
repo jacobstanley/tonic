@@ -39,7 +39,7 @@ data Binding n =
 
 data Term n =
       Return (Tail n)
-    | Iff    (Atom n) (Term n) (Term n)
+    | If     (Atom n) (Term n) (Term n)
     | Let    [n] (Tail n) (Term n)
     | LetRec (Bindings n) (Term n)
     deriving (Eq, Ord, Show)

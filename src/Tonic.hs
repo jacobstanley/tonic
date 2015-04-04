@@ -51,7 +51,7 @@ bvOfBindings = M.keysSet
 fvOfTerm :: Ord n => Term n -> Set n
 fvOfTerm term = case term of
     Return x      -> fvOfTail x
-    Iff    i t e  -> fvOfAtom i `S.union` fvOfTerm t `S.union` fvOfTerm e
+    If     i t e  -> fvOfAtom i `S.union` fvOfTerm t `S.union` fvOfTerm e
     Let    ns x y -> fvOfTail x `S.union` (fvOfTerm y `setDifferenceL` ns)
     LetRec bs x   -> (fvOfBindings bs `S.union` fvOfTerm x) `S.difference` bvOfBindings bs
 
@@ -116,10 +116,10 @@ renameTerm :: (Ord a, Ord b, Show a, Show b) => [b] -> Map a b -> Term a -> ([b]
 renameTerm gen names term = case term of
     Return x    -> (gen, Return (renameTail names x))
 
-    Iff i t e   -> let (gen1, t') = renameTerm gen  names t
+    If i t e    -> let (gen1, t') = renameTerm gen  names t
                        (gen2, e') = renameTerm gen1 names e
                    in
-                       (gen2, Iff (renameAtom names i) t' e')
+                       (gen2, If (renameAtom names i) t' e')
 
     Let ns x y  -> let (ns', gen1) = splitAt (length ns) gen
                        names'      = names `mapUnionR` M.fromList (ns `zip` gen)
@@ -166,7 +166,7 @@ substBinding subs binding = case binding of
 substTerm :: Ord n => Map n (Atom n) -> Term n -> Term n
 substTerm subs term = case term of
     Return x      -> Return (substTail subs x)
-    Iff    i t e  -> Iff (substAtom subs i) (substTerm subs t) (substTerm subs e)
+    If     i t e  -> If (substAtom subs i) (substTerm subs t) (substTerm subs e)
     Let    ns x y -> Let ns (substTail subs x) (substTerm (subs `mapDifferenceL` ns) y)
     LetRec bs x   -> let subs' = subs `mapDifferenceS` bvOfBindings bs
                      in  LetRec (M.map (substBinding subs') bs) (substTerm subs' x)
@@ -182,9 +182,9 @@ simplifyBinding binding = case binding of
 simplifyTerm :: Ord n => Term n -> Term n
 simplifyTerm term = case term of
     Return x            -> Return x
-    Iff (Num 0 _) _ e   -> simplifyTerm e
-    Iff (Num _ _) t _   -> simplifyTerm t
-    Iff i t e           -> Iff i (simplifyTerm t) (simplifyTerm e)
+    If (Num 0 _) _ e    -> simplifyTerm e
+    If (Num _ _) t _    -> simplifyTerm t
+    If i t e            -> If i (simplifyTerm t) (simplifyTerm e)
     Let ns (Copy ns') y -> simplifyTerm (substTerm (M.fromList (ns `zip` ns')) y)
     Let ns x          y -> Let ns x (simplifyTerm y)
     LetRec bs x         -> LetRec (M.map simplifyBinding bs) (simplifyTerm x)
@@ -200,7 +200,7 @@ deadBinding binding = case binding of
 deadTerm :: Ord n => Term n -> Term n
 deadTerm term = case term of
     Return x    -> Return x
-    Iff i t e   -> Iff i (deadTerm t) (deadTerm e)
+    If i t e    -> If i (deadTerm t) (deadTerm e)
 
     Let ns x y  -> let y'  = deadTerm y
                        fvs = fvOfTerm y'
@@ -240,7 +240,7 @@ inlineTerm env term = case term of
         _              -> error ("inlineTerm: can't inline " ++ show f ++ ", not in scope")
 
     Return x  -> Return x
-    Iff i t e -> Iff i (inlineTerm env t) (inlineTerm env e)
+    If i t e  -> If i (inlineTerm env t) (inlineTerm env e)
 
     Let ns (Invoke _ (Var f) xs) y ->
       case unsafeLookup "inlineTerm" f env of
@@ -259,7 +259,7 @@ inlineTerm env term = case term of
 letTerm :: [n] -> Term n -> Term n -> Term n
 letTerm ns term cont = case term of
     Return x    -> Let ns x cont
-    Iff i t e   -> Iff i (letTerm ns t cont) (letTerm ns e cont)
+    If i t e    -> If i (letTerm ns t cont) (letTerm ns e cont)
     Let ns' x y -> Let ns' x (letTerm ns y cont)
     LetRec bs x -> LetRec bs (letTerm ns x cont)
 

@@ -46,17 +46,9 @@ main = do
     --let (cls, clss) = closureOfBinding (M.fromList [("x", NumTy F32)]) "f" lam
     --mapM_ (writeClass "output") (cls:clss)
 
-    writeMain (rename oddeven)
+    writeMain (rename fib)
 
 ------------------------------------------------------------------------
-
-pattern F32     = Fmt F 32
-pattern I32     = Fmt I 32
-pattern U1      = Fmt U 1
-pattern NF32    = NumTy F32
-pattern NI32    = NumTy I32
-pattern NU1     = NumTy U1
-pattern JString = ObjTy "java/lang/String"
 
 foo0 :: Term String
 foo0 =
@@ -69,6 +61,8 @@ foo0 =
     Return (InvokeVirtual println (Var out) [Var y])
   where
     (c,x,y,z,w,out) = ("c","x","y","z","w","out")
+
+------------------------------------------------------------------------
 
 foo1 :: Term String
 foo1 =
@@ -97,6 +91,8 @@ foo1 =
 
     letrec bs tm = LetRec (M.fromList bs) tm
 
+------------------------------------------------------------------------
+
 foo2 :: Term String
 foo2 =
     letrec [ (toStr, Lambda f2s  [n]   (Return (InvokeStatic float2string [Var n])))
@@ -117,22 +113,60 @@ foo2 =
 
     letrec bs t = LetRec (M.fromList bs) t
 
+------------------------------------------------------------------------
+
+-- fib n = go n 0 1
+--   where
+--     go !n !x !y | n==0      = x
+--                 | otherwise = go (n-1) y (x+y)
+
+fib :: Term String
+fib =
+    letrec [ ("fib", Lambda i2i ["n"] $
+                       Return (Invoke iii2i (Var "fib_go") [Var "n", zero, one]))
+
+           , ("fib_go", Lambda iii2i ["n", "x", "y"] $
+                          if0 (Var "n") (Return (Copy [Var "x"])) $
+                          Let ["n1"] (InvokeBinary (Sub I32) (Var "n") one) $
+                          Let ["xy"] (InvokeBinary (Add I32) (Var "x") (Var "y")) $
+                          Return (Invoke iii2i (Var "fib_go") [Var "n1", Var "y", Var "xy"]))
+            ] $
+    Let ["res"] (Invoke i2i (Var "fib") [Num 10000 I32]) $
+    printInt (Var "res")
+  where
+    letrec bs t = LetRec (M.fromList bs) t
+
+    zero  = Num 0 I32
+    one   = Num 1 I32
+
+    i2i   = FunType [NI32]             [NI32]
+    iii2i = FunType [NI32, NI32, NI32] [NI32]
+
+    if0 u t e = If u e t
+
+    printInt v =
+        Let ["str"] (InvokeStatic int2string [v]) $
+        Let ["out"] (GetStatic sysOut) $
+        Return (InvokeVirtual println (Var "out") [Var "str"])
+
+------------------------------------------------------------------------
+
 oddeven :: Term String
 oddeven =
     letrec [ ("odd", Lambda i2b ["x"] $
                         Let ["b"] (InvokeBinary (Ceq I32) (Var "x") zero) $
-                        Iff (Var "b") (Return (Copy [false])) $
+                        If (Var "b") (Return (Copy [false])) $
                         Let ["y"] (InvokeBinary (Sub I32) (Var "x") one) $
                         Return (Invoke i2b (Var "even") [Var "y"]))
 
            , ("even", Lambda i2b ["x"] $
                         Let ["b"] (InvokeBinary (Ceq I32) (Var "x") zero) $
-                        Iff (Var "b") (Return (Copy [true])) $
+                        If (Var "b") (Return (Copy [true])) $
                         Let ["y"] (InvokeBinary (Sub I32) (Var "x") one) $
                         Return (Invoke i2b (Var "odd") [Var "y"])) ] $
 
     Let ["result"] (Invoke i2b (Var "odd") [Num 19 I32]) $
-    Iff (Var "result") (Let ["foo"] (Copy [Num 5.5 F32]) $ printTerm "19 is odd")
+    If (Var "result") (Let ["foo"] (Copy [Num 5.5 F32]) $ printTerm "19 is odd")
                        (printTerm "19 is even")
   where
     zero  = Num 0 I32
@@ -148,8 +182,21 @@ oddeven =
         Let ["out"] (GetStatic sysOut) $
         Return (InvokeVirtual println (Var "out") [Str str])
 
+------------------------------------------------------------------------
+
+pattern F32     = Fmt F 32
+pattern I32     = Fmt I 32
+pattern U1      = Fmt U 1
+pattern NF32    = NumTy F32
+pattern NI32    = NumTy I32
+pattern NU1     = NumTy U1
+pattern JString = ObjTy "java/lang/String"
+
 float2string :: SMethod
 float2string = SMethod "java/lang/Float" "toString" (MethodType [NF32] (Just JString))
+
+int2string :: SMethod
+int2string = SMethod "java/lang/Integer" "toString" (MethodType [NI32] (Just JString))
 
 sysOut :: SField
 sysOut = SField  "java/lang/System" "out" (ObjTy "java/io/PrintStream")

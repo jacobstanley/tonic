@@ -70,7 +70,7 @@ codeOfTerm vars env term = case term of
 
     LetRec bs x -> codeOfLetRec vars env bs x
 
-    Iff i t e   -> let (thenCode, tcs, vars1) = codeOfTerm vars env t
+    If i t e    -> let (thenCode, tcs, vars1) = codeOfTerm vars env t
                        (elseCode, ecs, vars2) = codeOfTerm vars env e
                        -- (elseCode, ecs, vars2) = codeOfTerm vars1 env e
 
@@ -128,7 +128,7 @@ closureOfBinding scopeTys (clsName, Lambda ftyp@(FunType argTys outTys) argNs te
     assignments = fldNs `zip` map ifld flds
     ifld (n, t) = IField clsName (fieldName n) t
 
-    vars0  = [1..]
+    vars0 = [1..]
     vars1 = drop (length argNs) vars0
 
     argLocals = zipWith L vars0 argTys
@@ -196,7 +196,7 @@ interfacesOfBinding (Lambda t _ x) = interfacesOfTerm x `S.union` S.singleton if
 interfacesOfTerm :: Term n -> Set G.Class
 interfacesOfTerm term = case term of
     Return    _ -> S.empty
-    Iff   _ t e -> interfacesOfTerm t <> interfacesOfTerm e
+    If    _ t e -> interfacesOfTerm t <> interfacesOfTerm e
     Let   _ _ x -> interfacesOfTerm x
     LetRec bs x -> S.unions (map interfacesOfBinding (M.elems bs)) <> interfacesOfTerm x
 
