@@ -27,39 +27,62 @@ class Main implements java.lang.Comparable {
   public static void main(java.lang.String[]);
     Signature: ([Ljava/lang/String;)V
     Code:
-       0: new           #6                  // class Main
-       3: dup           
-       4: invokespecial #7                  // Method "<init>":()V
-       7: astore_1      
-       8: bipush        42
-      10: istore_2      
-      11: iload_2       
-      12: iconst_1      
-      13: if_icmple     20
-      16: iconst_1      
-      17: goto          21
-      20: iconst_0      
-      21: istore_3      
-      22: getstatic     #8                  // Field java/lang/System.out:Ljava/io/PrintStream;
-      25: new           #9                  // class java/lang/StringBuilder
-      28: dup           
-      29: invokespecial #10                 // Method java/lang/StringBuilder."<init>":()V
-      32: ldc           #11                 // String Hello World = 
-      34: invokevirtual #12                 // Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
-      37: iload_3       
-      38: invokevirtual #13                 // Method java/lang/StringBuilder.append:(Z)Ljava/lang/StringBuilder;
-      41: invokevirtual #14                 // Method java/lang/StringBuilder.toString:()Ljava/lang/String;
-      44: invokevirtual #15                 // Method java/io/PrintStream.println:(Ljava/lang/String;)V
-      47: iload_2       
-      48: invokestatic  #16                 // Method java/lang/System.exit:(I)V
-      51: return        
+       0: bipush        19
+       2: invokestatic  #6                  // Method odd:(I)Z
+       5: pop           
+       6: return        
     LineNumberTable:
-      line 24: 0
-      line 26: 8
-      line 27: 11
-      line 28: 22
-      line 29: 47
-      line 30: 51
+      line 18: 0
+      line 19: 6
+
+  private static boolean odd(int);
+    Signature: (I)Z
+    Code:
+       0: iload_0       
+       1: bipush        27
+       3: if_icmpne     10
+       6: iconst_1      
+       7: goto          11
+      10: iconst_0      
+      11: istore_1      
+      12: iload_1       
+      13: ifeq          18
+      16: iconst_0      
+      17: ireturn       
+      18: iload_0       
+      19: iconst_1      
+      20: isub          
+      21: invokestatic  #7                  // Method even:(I)Z
+      24: ireturn       
+    LineNumberTable:
+      line 22: 0
+      line 23: 12
+      line 24: 16
+      line 26: 18
+
+  private static boolean even(int);
+    Signature: (I)Z
+    Code:
+       0: iload_0       
+       1: ifne          8
+       4: iconst_1      
+       5: goto          9
+       8: iconst_0      
+       9: istore_1      
+      10: iload_1       
+      11: ifeq          16
+      14: iconst_1      
+      15: ireturn       
+      16: iload_0       
+      17: iconst_1      
+      18: isub          
+      19: invokestatic  #6                  // Method odd:(I)Z
+      22: ireturn       
+    LineNumberTable:
+      line 31: 0
+      line 32: 10
+      line 33: 14
+      line 35: 16
 
   public int compareTo(java.lang.Object);
     Signature: (Ljava/lang/Object;)I
@@ -67,5 +90,5 @@ class Main implements java.lang.Comparable {
        0: iconst_m1     
        1: ireturn       
     LineNumberTable:
-      line 45: 0
+      line 40: 0
 }

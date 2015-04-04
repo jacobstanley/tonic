@@ -14,32 +14,27 @@ class Main implements Comparable {
         private float x;
     }
 
-    //static float bar = 2.5f;
-
-    //too hard basket :)
-    //long baz = 3L;
-    //double quxx = 4.8;
-
     public static void main(String[] args) {
-        Main main = new Main();
-
-        int x = 42;
-        boolean b = x > 1;
-        System.out.println("Hello World = " + b);
-        System.exit(x);
+        odd(19);
     }
 
-    //public static int add(int x, int y) {
-    //    return x + y;
-    //}
+    private static boolean odd(int x) {
+        boolean b = x == 27;
+        if (b) {
+            return false;
+        } else {
+            return even(x - 1);
+        }
+    }
 
-    //public static int sub(int x, int y) {
-    //    return x - y;
-    //}
-
-    //public static int mul(int x, int y) {
-    //    return x * y;
-    //}
+    private static boolean even(int x) {
+        boolean b = x == 0;
+        if (b) {
+            return true;
+        } else {
+            return odd(x - 1);
+        }
+    }
 
     public int compareTo(Object o) {
         return -1;
